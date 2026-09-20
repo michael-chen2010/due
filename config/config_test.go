@@ -2,6 +2,8 @@ package config_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -9,12 +11,29 @@ import (
 	"github.com/dobyte/due/v2/config/file"
 )
 
-func init() {
-	source := file.NewSource(file.WithMode(config.ReadWrite))
+func configureTest(t *testing.T, files map[string][]byte) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o600); err != nil {
+			t.Fatalf("write config fixture %s: %v", name, err)
+		}
+	}
+
+	source := file.NewSource(
+		file.WithPath(dir),
+		file.WithMode(config.ReadWrite),
+	)
 	config.SetConfigurator(config.NewConfigurator(config.WithSources(source)))
+	t.Cleanup(func() {
+		config.SetConfigurator(nil)
+	})
 }
 
 func TestWatch(t *testing.T) {
+	configureTest(t, map[string][]byte{
+		"config.json": []byte(`{"timezone":"Local","pid":"./run/gate.pid"}`),
+	})
 	ticker1 := time.NewTicker(2 * time.Second)
 	ticker2 := time.After(5 * time.Second)
 
@@ -31,6 +50,7 @@ func TestWatch(t *testing.T) {
 }
 
 func TestStore(t *testing.T) {
+	configureTest(t, nil)
 	ctx := context.Background()
 	filename := "config.json"
 	content1 := map[string]any{
@@ -56,6 +76,9 @@ func TestStore(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
+	configureTest(t, map[string][]byte{
+		"config.json": []byte(`{"timezone":"UTC","pid":"./run/gate.pid"}`),
+	})
 	ctx := context.Background()
 	filename := "config.json"
 	c, err := config.Load(ctx, file.Name, filename)

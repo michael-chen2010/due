@@ -176,3 +176,53 @@ func TestSessionTokenZeroIsNeverCurrent(t *testing.T) {
 		t.Fatal("zero token must never be current")
 	}
 }
+
+func TestSessionBindTokenInstallsExternallyAllocatedToken(t *testing.T) {
+	s := NewSession()
+	const uid int64 = 4001
+	first := &testConn{id: 41}
+	second := &testConn{id: 42}
+	s.AddConn(first)
+	s.AddConn(second)
+
+	firstToken := Token{UID: uid, Generation: 101}
+	if err := s.BindToken(first.ID(), uid, firstToken); err != nil {
+		t.Fatalf("bind first token: %v", err)
+	}
+	if got, err := s.Token(Conn, first.ID()); err != nil || got != firstToken {
+		t.Fatalf("first token=%+v err=%v, want %+v", got, err, firstToken)
+	}
+
+	secondToken := Token{UID: uid, Generation: 102}
+	if err := s.BindToken(second.ID(), uid, secondToken); err != nil {
+		t.Fatalf("bind second token: %v", err)
+	}
+	if first.UID() != 0 {
+		t.Fatalf("old connection uid=%d, want unbound", first.UID())
+	}
+	if got, err := s.Token(User, uid); err != nil || got != secondToken {
+		t.Fatalf("current token=%+v err=%v, want %+v", got, err, secondToken)
+	}
+	if s.IsCurrent(firstToken) {
+		t.Fatalf("first token %+v must be stale locally", firstToken)
+	}
+	if !s.IsCurrent(secondToken) {
+		t.Fatalf("second token %+v must be current locally", secondToken)
+	}
+}
+
+func TestSessionBindTokenRejectsInvalidToken(t *testing.T) {
+	s := NewSession()
+	conn := &testConn{id: 51}
+	s.AddConn(conn)
+
+	for _, token := range []Token{
+		{},
+		{UID: 5002, Generation: 1},
+		{UID: 5001, Generation: 0},
+	} {
+		if err := s.BindToken(conn.ID(), 5001, token); err == nil {
+			t.Fatalf("BindToken accepted invalid token %+v", token)
+		}
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/dobyte/due/v2/log"
 	"github.com/dobyte/due/v2/network"
 	"github.com/dobyte/due/v2/registry"
+	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/utils/xconv"
 	"github.com/dobyte/due/v2/utils/xuuid"
 )
@@ -54,23 +55,24 @@ const (
 type Option func(o *options)
 
 type options struct {
-	ctx               context.Context   // 上下文
-	id                string            // 实例ID
-	name              string            // 实例名称
-	server            network.Server    // 网关服务器
-	locator           locate.Locator    // 用户定位器
-	registry          registry.Registry // 服务注册器
-	dispatch          cluster.Dispatch  // 无状态路由消息分发策略
-	metadata          map[string]string // 元数据
-	addr              string            // 内部RPC监听地址
-	expose            bool              // 内部RPC是否暴露到公网
-	connNum           int               // 内部RPC拨号连接数
-	callTimeout       time.Duration     // 内部RPC调用超时时间
-	dialTimeout       time.Duration     // 内部RPC拨号超时时间
-	dialRetryTimes    int               // 内部RPC拨号重试次数
-	writeTimeout      time.Duration     // 内部RPC写入超时时间
-	writeQueueSize    int32             // 内部RPC写入队列大小
-	faultRecoveryTime time.Duration     // 内部RPC故障恢复时间
+	ctx               context.Context        // 上下文
+	id                string                 // 实例ID
+	name              string                 // 实例名称
+	server            network.Server         // 网关服务器
+	locator           locate.Locator         // 用户定位器
+	registry          registry.Registry      // 服务注册器
+	ownershipStore    session.OwnershipStore // 分布式会话所有权存储器
+	dispatch          cluster.Dispatch       // 无状态路由消息分发策略
+	metadata          map[string]string      // 元数据
+	addr              string                 // 内部RPC监听地址
+	expose            bool                   // 内部RPC是否暴露到公网
+	connNum           int                    // 内部RPC拨号连接数
+	callTimeout       time.Duration          // 内部RPC调用超时时间
+	dialTimeout       time.Duration          // 内部RPC拨号超时时间
+	dialRetryTimes    int                    // 内部RPC拨号重试次数
+	writeTimeout      time.Duration          // 内部RPC写入超时时间
+	writeQueueSize    int32                  // 内部RPC写入队列大小
+	faultRecoveryTime time.Duration          // 内部RPC故障恢复时间
 }
 
 func defaultOptions() *options {
@@ -214,6 +216,18 @@ func WithRegistry(r registry.Registry) Option {
 			o.registry = r
 		} else {
 			log.Warnf("the specified registry is nil and will be ignored")
+		}
+	}
+}
+
+// WithOwnershipStore 设置分布式会话所有权存储器。
+// 未设置时 Gate 保持原有本地 Session generation 行为。
+func WithOwnershipStore(store session.OwnershipStore) Option {
+	return func(o *options) {
+		if store != nil {
+			o.ownershipStore = store
+		} else {
+			log.Warnf("the specified ownership store is nil and will be ignored")
 		}
 	}
 }

@@ -164,6 +164,9 @@ func (g *Gate) handleDisconnect(conn network.Conn) {
 	if uid != 0 {
 		ctx, cancel := context.WithTimeout(g.ctx, 3*time.Second)
 		_ = g.proxy.unbindGate(ctx, cid, uid)
+		if _, err := g.releaseSession(ctx, token); err != nil {
+			log.Errorf("release session ownership on disconnect failed, uid: %d generation: %d err: %v", uid, token.Generation, err)
+		}
 		cancel()
 	}
 

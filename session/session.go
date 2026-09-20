@@ -111,7 +111,7 @@ func (s *Session) Has(kind Kind, target int64) (ok bool, err error) {
 	return
 }
 
-// Bind 绑定用户ID
+// Bind 绑定用户ID，并由本地 Session 分配 generation。
 func (s *Session) Bind(cid, uid int64) error {
 	s.rw.Lock()
 	defer s.rw.Unlock()
@@ -120,26 +120,56 @@ func (s *Session) Bind(cid, uid int64) error {
 	if err != nil {
 		return err
 	}
+	if conn.UID() == uid {
+		return nil
+	}
 
+	token := Token{UID: uid, Generation: s.nextGeneration(uid)}
+	s.bindToken(conn, uid, token)
+	return nil
+}
+
+// BindToken 绑定由外部 OwnershipStore 分配的 Session Token。
+func (s *Session) BindToken(cid, uid int64, token Token) error {
+	if uid <= 0 || token.UID != uid || token.Generation == 0 {
+		return errors.ErrInvalidArgument
+	}
+
+	s.rw.Lock()
+	defer s.rw.Unlock()
+
+	conn, err := s.conn(Conn, cid)
+	if err != nil {
+		return err
+	}
+
+	s.bindToken(conn, uid, token)
+	if token.Generation > s.generations[uid] {
+		s.generations[uid] = token.Generation
+	}
+	return nil
+}
+
+func (s *Session) bindToken(conn network.Conn, uid int64, token Token) {
+	cid := conn.ID()
 	if oldUID := conn.UID(); oldUID != 0 {
-		if uid == oldUID {
-			return nil
-		}
-		if current, ok := s.users[oldUID]; ok && current == conn {
+		if oldUID == uid {
+			if current, ok := s.users[uid]; ok && current == conn {
+				s.tokens[cid] = token
+				return
+			}
+		} else if current, ok := s.users[oldUID]; ok && current == conn {
 			delete(s.users, oldUID)
 		}
 	}
 
-	if oldConn, ok := s.users[uid]; ok {
+	if oldConn, ok := s.users[uid]; ok && oldConn != conn {
 		oldConn.Unbind()
 	}
 
-	generation := s.nextGeneration(uid)
 	conn.Bind(uid)
 	s.users[uid] = conn
-	s.tokens[cid] = Token{UID: uid, Generation: generation}
-
-	return nil
+	s.tokens[cid] = token
 }
 
 // Unbind 解绑用户ID

@@ -20,12 +20,16 @@ func (p *provider) Bind(ctx context.Context, cid, uid int64) error {
 		return errors.ErrInvalidArgument
 	}
 
-	if err := p.gate.session.Bind(cid, uid); err != nil {
+	token, err := p.gate.bindSession(ctx, cid, uid)
+	if err != nil {
 		return err
 	}
 
-	if err := p.gate.proxy.bindGate(ctx, cid, uid); err != nil {
+	if err = p.gate.proxy.bindGate(ctx, cid, uid); err != nil {
 		_, _ = p.gate.session.Unbind(uid)
+		if _, releaseErr := p.gate.releaseSession(ctx, token); releaseErr != nil {
+			log.Errorf("release session ownership after bind failure failed, uid = %d err = %v", uid, releaseErr)
+		}
 		return err
 	}
 
@@ -36,6 +40,15 @@ func (p *provider) Bind(ctx context.Context, cid, uid int64) error {
 func (p *provider) Unbind(ctx context.Context, uid int64) error {
 	if uid == 0 {
 		return errors.ErrInvalidArgument
+	}
+
+	token, err := p.gate.session.Token(session.User, uid)
+	if err != nil {
+		return err
+	}
+
+	if _, err = p.gate.releaseSession(ctx, token); err != nil {
+		return err
 	}
 
 	cid, err := p.gate.session.Unbind(uid)

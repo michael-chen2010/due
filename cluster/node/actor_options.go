@@ -1,11 +1,20 @@
 package node
 
+import "time"
+
+type ActorReleaseGuard func(actor *Actor) bool
+
+type ActorReleaseHook func(actor *Actor)
+
 type actorOptions struct {
-	id       string // Actor编号
-	kind     string // Actor类型
-	args     []any  // 传递到Processor中的参数
-	wait     bool   // 是否需要等待
-	dispatch bool   // 是否接受调度器调度
+	id           string            // Actor编号
+	kind         string            // Actor类型
+	args         []any             // 传递到Processor中的参数
+	wait         bool              // 是否需要等待
+	dispatch     bool              // 是否接受调度器调度
+	idleTimeout  time.Duration     // 空闲释放超时；<=0 表示禁用自动释放
+	releaseGuard ActorReleaseGuard // 自动释放前的最终校验
+	releaseHook  ActorReleaseHook  // Actor 实际销毁后的回调
 }
 
 type ActorOption func(o *actorOptions)
@@ -37,4 +46,31 @@ func WithActorNonWait() ActorOption {
 // WithActorNonDispatch 设置Actor不可调度
 func WithActorNonDispatch() ActorOption {
 	return func(o *actorOptions) { o.dispatch = false }
+}
+
+// WithActorIdleTimeout 设置 Actor 进入 Idle 后的自动释放超时。
+func WithActorIdleTimeout(timeout time.Duration) ActorOption {
+	return func(o *actorOptions) {
+		if timeout > 0 {
+			o.idleTimeout = timeout
+		}
+	}
+}
+
+// WithActorReleaseGuard 设置 Idle 超时释放前的最终校验。
+func WithActorReleaseGuard(guard ActorReleaseGuard) ActorOption {
+	return func(o *actorOptions) {
+		if guard != nil {
+			o.releaseGuard = guard
+		}
+	}
+}
+
+// WithActorReleaseHook 设置 Actor 实际销毁后的回调。
+func WithActorReleaseHook(hook ActorReleaseHook) ActorOption {
+	return func(o *actorOptions) {
+		if hook != nil {
+			o.releaseHook = hook
+		}
+	}
 }

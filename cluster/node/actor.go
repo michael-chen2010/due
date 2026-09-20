@@ -30,6 +30,9 @@ type Actor struct {
 	mailbox             chan Context                   // 邮箱
 	fnChan              chan func()                    // 调用函数
 	binds               sync.Map                       // 绑定的用户
+	lifecycleMu         sync.Mutex                     // 生命周期定时器锁
+	idleTimer           *time.Timer                    // Idle 自动释放定时器
+	idleGeneration      uint64                         // 防止旧定时器释放新一代 Actor 状态
 }
 
 // ID 获取Actor的ID
@@ -45,6 +48,82 @@ func (a *Actor) PID() string {
 // Kind 获取Actor类型
 func (a *Actor) Kind() string {
 	return a.opts.kind
+}
+
+// Active 标记 Actor 已重新活跃，并取消当前 Idle 自动释放计划。
+func (a *Actor) Active() {
+	if a == nil {
+		return
+	}
+
+	a.lifecycleMu.Lock()
+	defer a.lifecycleMu.Unlock()
+	if a.state.Load() != started {
+		return
+	}
+
+	a.idleGeneration++
+	if a.idleTimer != nil {
+		a.idleTimer.Stop()
+		a.idleTimer = nil
+	}
+}
+
+// Touch 等价于 Active，用于处理任意能够证明 Actor 仍活跃的事件。
+func (a *Actor) Touch() {
+	a.Active()
+}
+
+// Idle 安排 Actor 在配置的 idleTimeout 后自动释放。
+func (a *Actor) Idle() {
+	if a == nil || a.opts == nil || a.opts.idleTimeout <= 0 {
+		return
+	}
+
+	a.lifecycleMu.Lock()
+	if a.state.Load() != started {
+		a.lifecycleMu.Unlock()
+		return
+	}
+	if a.idleTimer != nil {
+		a.idleTimer.Stop()
+	}
+	a.idleGeneration++
+	generation := a.idleGeneration
+	a.idleTimer = time.AfterFunc(a.opts.idleTimeout, func() {
+		a.lifecycleMu.Lock()
+		if a.state.Load() != started || a.idleGeneration != generation {
+			a.lifecycleMu.Unlock()
+			return
+		}
+		a.idleTimer = nil
+		a.lifecycleMu.Unlock()
+
+		if a.opts.releaseGuard != nil && !a.opts.releaseGuard(a) {
+			return
+		}
+
+		a.lifecycleMu.Lock()
+		if a.state.Load() != started || a.idleGeneration != generation {
+			a.lifecycleMu.Unlock()
+			return
+		}
+		a.idleGeneration++
+		a.lifecycleMu.Unlock()
+
+		a.Destroy()
+	})
+	a.lifecycleMu.Unlock()
+}
+
+func (a *Actor) cancelIdleRelease() {
+	a.lifecycleMu.Lock()
+	a.idleGeneration++
+	if a.idleTimer != nil {
+		a.idleTimer.Stop()
+		a.idleTimer = nil
+	}
+	a.lifecycleMu.Unlock()
 }
 
 // Spawn 衍生出一个Actor
@@ -214,13 +293,11 @@ func (a *Actor) Push(uid int64, message *cluster.Message) error {
 }
 
 // Destroy 销毁Actor
-func (a *Actor) Destroy() (ok bool) {
-	if ok = a.destroy(); !ok {
-		return
+func (a *Actor) Destroy() bool {
+	if a == nil || a.scheduler == nil {
+		return false
 	}
-
-	_, ok = a.scheduler.remove(a.Kind(), a.ID())
-	return
+	return a.scheduler.kill(a.Kind(), a.ID())
 }
 
 // 销毁Actor
@@ -229,6 +306,7 @@ func (a *Actor) destroy() bool {
 		return false
 	}
 
+	a.cancelIdleRelease()
 	a.processor.Destroy()
 
 	a.scheduler.batchUnbindActor(func(relations map[int64]map[string]*Actor) {
@@ -239,7 +317,6 @@ func (a *Actor) destroy() bool {
 	})
 
 	a.rw.Lock()
-	defer a.rw.Unlock()
 
 	close(a.mailbox)
 
@@ -252,6 +329,12 @@ func (a *Actor) destroy() bool {
 	a.processor = nil
 
 	a.defaultRouteHandler = nil
+
+	a.rw.Unlock()
+
+	if a.opts.releaseHook != nil {
+		a.opts.releaseHook(a)
+	}
 
 	return true
 }

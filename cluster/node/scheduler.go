@@ -91,6 +91,19 @@ func (s *Scheduler) kill(kind, id string) bool {
 	return ok
 }
 
+// killActor 仅销毁仍由 Scheduler 注册的同一 Actor 实例，避免旧实例误杀同 PID 的替代 Actor。
+func (s *Scheduler) killActor(actor *Actor) bool {
+	if !s.removeActor(actor) {
+		return false
+	}
+
+	ok := actor.destroy()
+	if actor.opts.wait {
+		s.node.doneWait()
+	}
+	return ok
+}
+
 // 移除Actor
 func (s *Scheduler) remove(kind, id string) (*Actor, bool) {
 	s.mu.Lock()
@@ -101,15 +114,35 @@ func (s *Scheduler) remove(kind, id string) (*Actor, bool) {
 		return nil, false
 	}
 
-	s.actors.Delete(act.PID())
+	s.removeActorLocked(act)
+	return act, true
+}
 
-	for _, relations := range s.relations {
-		if a, ok := relations[act.Kind()]; ok && a == act {
-			delete(relations, act.Kind())
-		}
+func (s *Scheduler) removeActor(actor *Actor) bool {
+	if actor == nil {
+		return false
 	}
 
-	return act, true
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, ok := s.load(actor.Kind(), actor.ID())
+	if !ok || current != actor {
+		return false
+	}
+
+	s.removeActorLocked(actor)
+	return true
+}
+
+func (s *Scheduler) removeActorLocked(actor *Actor) {
+	s.actors.Delete(actor.PID())
+
+	for _, relations := range s.relations {
+		if a, ok := relations[actor.Kind()]; ok && a == actor {
+			delete(relations, actor.Kind())
+		}
+	}
 }
 
 // 加载Actor

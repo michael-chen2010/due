@@ -190,3 +190,45 @@ func TestActorTryInvokeReportsWhetherCallbackWasQueued(t *testing.T) {
 		t.Fatal("TryInvoke returned true for destroyed actor")
 	}
 }
+
+func TestActorStaleIdleTimerCannotReleaseReplacementActor(t *testing.T) {
+	n := NewNode(WithID("actor-stale-idle-node"), WithName("game"))
+	actorID := t.Name()
+	opts := []ActorOption{
+		WithActorKind("player"),
+		WithActorID(actorID),
+		WithActorNonWait(),
+		WithActorNonDispatch(),
+	}
+
+	oldActor, err := n.Proxy().Spawn(
+		func(*Actor, ...any) Processor { return &BaseProcessor{} },
+		append(opts, WithActorIdleTimeout(25*time.Millisecond))...,
+	)
+	if err != nil {
+		t.Fatalf("spawn old actor: %v", err)
+	}
+	t.Cleanup(func() { oldActor.destroy() })
+
+	oldActor.Idle()
+
+	removed, ok := n.scheduler.remove(oldActor.Kind(), oldActor.ID())
+	if !ok || removed != oldActor {
+		t.Fatal("failed to simulate old actor removal before destroy finalization")
+	}
+
+	replacement, err := n.Proxy().Spawn(
+		func(*Actor, ...any) Processor { return &BaseProcessor{} },
+		opts...,
+	)
+	if err != nil {
+		t.Fatalf("spawn replacement actor: %v", err)
+	}
+	t.Cleanup(func() { replacement.Destroy() })
+
+	time.Sleep(60 * time.Millisecond)
+
+	if got, ok := n.Proxy().Actor(replacement.Kind(), replacement.ID()); !ok || got != replacement {
+		t.Fatal("stale idle timer released the replacement actor")
+	}
+}

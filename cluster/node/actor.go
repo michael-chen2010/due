@@ -303,7 +303,7 @@ func (a *Actor) Destroy() bool {
 	if a == nil || a.scheduler == nil {
 		return false
 	}
-	return a.scheduler.kill(a.Kind(), a.ID())
+	return a.scheduler.killActor(a)
 }
 
 // 销毁Actor

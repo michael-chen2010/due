@@ -15,6 +15,7 @@ var (
 	ErrInvalidMessage          = New("invalid message")
 	ErrInvalidReader           = New("invalid reader")
 	ErrNotFoundSession         = New("not found session")
+	ErrStaleSession            = New("stale session")
 	ErrInvalidSessionKind      = New("invalid session kind")
 	ErrReceiveTargetEmpty      = New("the receive target is empty")
 	ErrInvalidArgument         = New("invalid argument")

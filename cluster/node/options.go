@@ -11,6 +11,7 @@ import (
 	"github.com/dobyte/due/v2/locate"
 	"github.com/dobyte/due/v2/log"
 	"github.com/dobyte/due/v2/registry"
+	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/transport"
 	"github.com/dobyte/due/v2/utils/xconv"
 	"github.com/dobyte/due/v2/utils/xuuid"
@@ -53,25 +54,26 @@ type SchedulingModel string
 type Option func(o *options)
 
 type options struct {
-	ctx               context.Context       // 上下文
-	id                string                // 实例ID
-	name              string                // 实例名称；相同实例名称的节点，用户只能绑定其中一个
-	codec             encoding.Codec        // 编解码器
-	weight            int                   // 服务器权重
-	locator           locate.Locator        // 用户定位器
-	registry          registry.Registry     // 服务注册器
-	encryptor         crypto.Encryptor      // 消息加密器
-	transporter       transport.Transporter // 消息传输器
-	metadata          map[string]string     // 元数据
-	addr              string                // 内部RPC监听地址
-	expose            bool                  // 内部RPC是否暴露到公网
-	connNum           int                   // 内部RPC拨号连接数
-	callTimeout       time.Duration         // 内部RPC调用超时时间
-	dialTimeout       time.Duration         // 内部RPC拨号超时时间
-	dialRetryTimes    int                   // 内部RPC拨号重试次数
-	writeTimeout      time.Duration         // 内部RPC写入超时时间
-	writeQueueSize    int32                 // 内部RPC写入队列大小
-	faultRecoveryTime time.Duration         // 内部RPC故障恢复时间
+	ctx               context.Context        // 上下文
+	id                string                 // 实例ID
+	name              string                 // 实例名称；相同实例名称的节点，用户只能绑定其中一个
+	codec             encoding.Codec         // 编解码器
+	weight            int                    // 服务器权重
+	locator           locate.Locator         // 用户定位器
+	registry          registry.Registry      // 服务注册器
+	ownershipStore    session.OwnershipStore // 分布式会话所有权存储器
+	encryptor         crypto.Encryptor       // 消息加密器
+	transporter       transport.Transporter  // 消息传输器
+	metadata          map[string]string      // 元数据
+	addr              string                 // 内部RPC监听地址
+	expose            bool                   // 内部RPC是否暴露到公网
+	connNum           int                    // 内部RPC拨号连接数
+	callTimeout       time.Duration          // 内部RPC调用超时时间
+	dialTimeout       time.Duration          // 内部RPC拨号超时时间
+	dialRetryTimes    int                    // 内部RPC拨号重试次数
+	writeTimeout      time.Duration          // 内部RPC写入超时时间
+	writeQueueSize    int32                  // 内部RPC写入队列大小
+	faultRecoveryTime time.Duration          // 内部RPC故障恢复时间
 }
 
 func defaultOptions() *options {
@@ -248,6 +250,18 @@ func WithRegistry(r registry.Registry) Option {
 			o.registry = r
 		} else {
 			log.Warnf("the specified registry is nil and will be ignored")
+		}
+	}
+}
+
+// WithOwnershipStore 设置分布式会话所有权存储器。
+// 配置后，来自 Gate 的 Stateful Route 会在进入 handler 前校验 Session Token。
+func WithOwnershipStore(store session.OwnershipStore) Option {
+	return func(o *options) {
+		if store != nil {
+			o.ownershipStore = store
+		} else {
+			log.Warnf("the specified ownership store is nil and will be ignored")
 		}
 	}
 }

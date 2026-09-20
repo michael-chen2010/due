@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/dobyte/due/v2/cluster"
+	"github.com/dobyte/due/v2/errors"
 	"github.com/dobyte/due/v2/log"
 	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/utils/xcall"
@@ -172,6 +173,18 @@ func (r *Router) handle(req *request) {
 		return
 	}
 
+	if ok {
+		if err := r.validateSession(req, route); err != nil {
+			if errors.Is(err, errors.ErrStaleSession) {
+				log.Warnf("reject stale session request, gid: %s cid: %d uid: %d route: %d generation: %d", req.gid, req.cid, req.uid, req.message.Route, req.token.Generation)
+			} else {
+				log.Errorf("validate session request failed, gid: %s cid: %d uid: %d route: %d generation: %d err: %v", req.gid, req.cid, req.uid, req.message.Route, req.token.Generation, err)
+			}
+			req.compareVersionRecycle(version)
+			return
+		}
+	}
+
 	if r.preRouteHandler != nil {
 		xcall.Call(func() { r.preRouteHandler(req) })
 	}
@@ -191,6 +204,27 @@ func (r *Router) handle(req *request) {
 	req.compareVersionExecDefer(version)
 
 	req.compareVersionRecycle(version)
+}
+
+func (r *Router) validateSession(req *request, route *routeEntity) error {
+	if route == nil || !route.options.Stateful || req.gid == "" || r.node.opts.ownershipStore == nil {
+		return nil
+	}
+
+	token := req.token
+	if req.uid <= 0 || token.UID != req.uid || token.Generation == 0 {
+		return errors.ErrStaleSession
+	}
+
+	current, ok, err := r.node.opts.ownershipStore.Current(req.ctx, req.uid)
+	if err != nil {
+		return err
+	}
+	if !ok || current != token {
+		return errors.ErrStaleSession
+	}
+
+	return nil
 }
 
 type RouterGroup struct {

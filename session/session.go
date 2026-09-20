@@ -18,6 +18,13 @@ const (
 
 type Kind int
 
+// Token identifies one binding generation of a user session.
+// A zero Token is never current.
+type Token struct {
+	UID        int64
+	Generation uint64
+}
+
 func (k Kind) String() string {
 	switch k {
 	case Conn:
@@ -30,17 +37,21 @@ func (k Kind) String() string {
 }
 
 type Session struct {
-	rw       sync.RWMutex                         // 读写锁
-	conns    map[int64]network.Conn               // 连接会话（连接ID -> network.Conn）
-	users    map[int64]network.Conn               // 用户会话（用户ID -> network.Conn）
-	channels map[string]map[network.Conn]struct{} // 会话频道（频道名 -> [network.Conn --> none]）
+	rw          sync.RWMutex                         // 读写锁
+	conns       map[int64]network.Conn               // 连接会话（连接ID -> network.Conn）
+	users       map[int64]network.Conn               // 用户会话（用户ID -> network.Conn）
+	tokens      map[int64]Token                      // 连接绑定令牌（连接ID -> Token）
+	generations map[int64]uint64                     // 用户会话代次（用户ID -> generation）
+	channels    map[string]map[network.Conn]struct{} // 会话频道（频道名 -> [network.Conn --> none]）
 }
 
 func NewSession() *Session {
 	return &Session{
-		conns:    make(map[int64]network.Conn),
-		users:    make(map[int64]network.Conn),
-		channels: make(map[string]map[network.Conn]struct{}),
+		conns:       make(map[int64]network.Conn),
+		users:       make(map[int64]network.Conn),
+		tokens:      make(map[int64]Token),
+		generations: make(map[int64]uint64),
+		channels:    make(map[string]map[network.Conn]struct{}),
 	}
 }
 
@@ -54,7 +65,9 @@ func (s *Session) AddConn(conn network.Conn) {
 	s.conns[cid] = conn
 
 	if uid != 0 {
+		generation := s.nextGeneration(uid)
 		s.users[uid] = conn
+		s.tokens[cid] = Token{UID: uid, Generation: generation}
 	}
 }
 
@@ -66,9 +79,12 @@ func (s *Session) RemConn(conn network.Conn) {
 	cid, uid := conn.ID(), conn.UID()
 
 	delete(s.conns, cid)
+	delete(s.tokens, cid)
 
 	if uid != 0 {
-		delete(s.users, uid)
+		if current, ok := s.users[uid]; ok && current == conn {
+			delete(s.users, uid)
+		}
 	}
 
 	conn.Attr().Visit(func(channel, _ any) bool {
@@ -109,15 +125,19 @@ func (s *Session) Bind(cid, uid int64) error {
 		if uid == oldUID {
 			return nil
 		}
-		delete(s.users, oldUID)
+		if current, ok := s.users[oldUID]; ok && current == conn {
+			delete(s.users, oldUID)
+		}
 	}
 
 	if oldConn, ok := s.users[uid]; ok {
 		oldConn.Unbind()
 	}
 
+	generation := s.nextGeneration(uid)
 	conn.Bind(uid)
 	s.users[uid] = conn
+	s.tokens[cid] = Token{UID: uid, Generation: generation}
 
 	return nil
 }
@@ -136,6 +156,37 @@ func (s *Session) Unbind(uid int64) (int64, error) {
 	delete(s.users, uid)
 
 	return conn.ID(), nil
+}
+
+// Token returns the latest binding token associated with a connection or user session.
+// An existing but currently unbound connection returns the last token it held.
+func (s *Session) Token(kind Kind, target int64) (Token, error) {
+	s.rw.RLock()
+	defer s.rw.RUnlock()
+
+	conn, err := s.conn(kind, target)
+	if err != nil {
+		return Token{}, err
+	}
+
+	return s.tokens[conn.ID()], nil
+}
+
+// IsCurrent reports whether token identifies the currently bound session for its UID.
+func (s *Session) IsCurrent(token Token) bool {
+	if token.UID == 0 || token.Generation == 0 {
+		return false
+	}
+
+	s.rw.RLock()
+	defer s.rw.RUnlock()
+
+	conn, ok := s.users[token.UID]
+	if !ok {
+		return false
+	}
+
+	return s.tokens[conn.ID()] == token
 }
 
 // LocalIP 获取本地IP
@@ -475,6 +526,15 @@ func (s *Session) Stat(kind Kind) (int64, error) {
 	default:
 		return 0, errors.ErrInvalidSessionKind
 	}
+}
+
+func (s *Session) nextGeneration(uid int64) uint64 {
+	generation := s.generations[uid] + 1
+	if generation == 0 {
+		generation++
+	}
+	s.generations[uid] = generation
+	return generation
 }
 
 // 获取会话

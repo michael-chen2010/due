@@ -138,14 +138,20 @@ func (a *Actor) Proxy() *Proxy {
 
 // Invoke 调用函数（Actor内线程安全）
 func (a *Actor) Invoke(fn func()) {
+	a.TryInvoke(fn)
+}
+
+// TryInvoke 调用函数并返回是否成功投递到仍处于 started 状态的 Actor。
+func (a *Actor) TryInvoke(fn func()) bool {
 	a.rw.RLock()
 	defer a.rw.RUnlock()
 
 	if a.state.Load() != started {
-		return
+		return false
 	}
 
 	a.fnChan <- fn
+	return true
 }
 
 // AfterFunc 延迟调用，与官方的time.AfterFunc用法一致

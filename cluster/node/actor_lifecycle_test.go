@@ -169,3 +169,24 @@ func TestActorReleaseHookRunsOnceOnExplicitDestroy(t *testing.T) {
 		t.Fatalf("release hook calls=%d, want 1", got)
 	}
 }
+
+func TestActorTryInvokeReportsWhetherCallbackWasQueued(t *testing.T) {
+	_, actor := spawnLifecycleActor(t)
+
+	called := make(chan struct{}, 1)
+	if !actor.TryInvoke(func() { called <- struct{}{} }) {
+		t.Fatal("TryInvoke returned false for started actor")
+	}
+	select {
+	case <-called:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("TryInvoke callback was not executed")
+	}
+
+	if !actor.Destroy() {
+		t.Fatal("Destroy returned false")
+	}
+	if actor.TryInvoke(func() { t.Fatal("destroyed actor executed TryInvoke callback") }) {
+		t.Fatal("TryInvoke returned true for destroyed actor")
+	}
+}

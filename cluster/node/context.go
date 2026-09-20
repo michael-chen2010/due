@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dobyte/due/v2/cluster"
+	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/transport"
 )
 
@@ -17,6 +18,8 @@ type Context interface {
 	CID() int64
 	// UID 获取用户ID
 	UID() int64
+	// SessionToken 获取当前请求携带的会话绑定令牌
+	SessionToken() session.Token
 	// Seq 获取消息序列号
 	Seq() int32
 	// Route 获取消息路由号

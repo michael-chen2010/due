@@ -8,6 +8,7 @@ import (
 	"github.com/dobyte/due/v2/cluster"
 	"github.com/dobyte/due/v2/core/buffer"
 	"github.com/dobyte/due/v2/internal/transporter/node"
+	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/utils/xuuid"
 )
 
@@ -29,7 +30,7 @@ func TestBuilder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = client.Deliver(context.Background(), 1, 2, buffer.NewNocopyBuffer([]byte("hello world")))
+	err = client.Deliver(context.Background(), 1, 2, session.Token{UID: 2, Generation: 1}, buffer.NewNocopyBuffer([]byte("hello world")))
 	if err != nil {
 		t.Fatal(err)
 	}

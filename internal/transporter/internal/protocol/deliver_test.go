@@ -9,23 +9,22 @@ import (
 )
 
 func TestEncodeDeliverReq(t *testing.T) {
-	buffer := protocol.EncodeDeliverReq(1, 2, 3, buffer.NewNocopyBuffer([]byte("hello world")))
+	buffer := protocol.EncodeDeliverReq(1, 2, 3, 7, buffer.NewNocopyBuffer([]byte("hello world")))
 
 	t.Log(buffer.Bytes())
 }
 
 func TestDecodeDeliverReq(t *testing.T) {
-	buffer := protocol.EncodeDeliverReq(1, 2, 3, buffer.NewNocopyBuffer([]byte("hello world")))
+	const generation uint64 = 7
+	buffer := protocol.EncodeDeliverReq(1, 2, 3, generation, buffer.NewNocopyBuffer([]byte("hello world")))
 
-	seq, cid, uid, message, err := protocol.DecodeDeliverReq(buffer.Bytes())
+	seq, cid, uid, gotGeneration, message, err := protocol.DecodeDeliverReq(buffer.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	t.Logf("seq: %v", seq)
-	t.Logf("cid: %v", cid)
-	t.Logf("uid: %v", uid)
-	t.Logf("message: %v", string(message))
+	if seq != 1 || cid != 2 || uid != 3 || gotGeneration != generation || string(message) != "hello world" {
+		t.Fatalf("decoded seq=%d cid=%d uid=%d generation=%d message=%q", seq, cid, uid, gotGeneration, string(message))
+	}
 }
 
 func TestEncodeDeliverRes(t *testing.T) {

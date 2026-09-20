@@ -30,6 +30,7 @@ type request struct {
 	pid     string           // 来源Actor ID
 	cid     int64            // 连接ID
 	uid     int64            // 用户ID
+	token   session.Token    // 会话绑定令牌
 	message *cluster.Message // 请求消息
 	version atomic.Int32     // 版本号
 	chain   *chains.Chain    // 调用链
@@ -54,6 +55,11 @@ func (r *request) CID() int64 {
 // UID 获取用户ID
 func (r *request) UID() int64 {
 	return r.uid
+}
+
+// SessionToken 获取当前请求携带的会话绑定令牌
+func (r *request) SessionToken() session.Token {
+	return r.token
 }
 
 // Seq 获取消息序列号
@@ -136,12 +142,13 @@ func (r *request) compareVersionExecDefer(version int32) {
 // Clone 克隆Context
 func (r *request) Clone() Context {
 	c := &request{
-		node: r.node,
-		gid:  r.gid,
-		nid:  r.nid,
-		cid:  r.cid,
-		uid:  r.uid,
-		ctx:  context.Background(),
+		node:  r.node,
+		gid:   r.gid,
+		nid:   r.nid,
+		cid:   r.cid,
+		uid:   r.uid,
+		token: r.token,
+		ctx:   context.Background(),
 		message: &cluster.Message{
 			Seq:   r.message.Seq,
 			Route: r.message.Route,
@@ -470,6 +477,7 @@ func (r *request) compareVersionRecycle(version int32) {
 // 重置请求对象
 func (r *request) reset() {
 	r.message.Data = nil
+	r.token = session.Token{}
 
 	r.actor.Store((*Actor)(nil))
 

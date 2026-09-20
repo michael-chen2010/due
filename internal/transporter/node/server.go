@@ -9,6 +9,7 @@ import (
 	"github.com/dobyte/due/v2/internal/transporter/internal/protocol"
 	"github.com/dobyte/due/v2/internal/transporter/internal/route"
 	"github.com/dobyte/due/v2/internal/transporter/internal/server"
+	"github.com/dobyte/due/v2/session"
 )
 
 type Server struct {
@@ -39,7 +40,7 @@ func (s *Server) init() {
 
 // 触发事件
 func (s *Server) trigger(conn *server.Conn, data []byte) error {
-	seq, event, cid, uid, err := protocol.DecodeTriggerReq(data)
+	seq, event, cid, uid, generation, err := protocol.DecodeTriggerReq(data)
 	if err != nil {
 		return err
 	}
@@ -48,7 +49,8 @@ func (s *Server) trigger(conn *server.Conn, data []byte) error {
 		return errors.ErrIllegalRequest
 	}
 
-	if err = s.provider.Trigger(context.Background(), conn.InsID, cid, uid, event); seq == 0 {
+	token := session.Token{UID: uid, Generation: generation}
+	if err = s.provider.Trigger(context.Background(), conn.InsID, cid, uid, token, event); seq == 0 {
 		if errors.Is(err, errors.ErrNotFoundSession) {
 			return nil
 		} else {
@@ -61,7 +63,7 @@ func (s *Server) trigger(conn *server.Conn, data []byte) error {
 
 // 投递消息
 func (s *Server) deliver(conn *server.Conn, data []byte) error {
-	seq, cid, uid, message, err := protocol.DecodeDeliverReq(data)
+	seq, cid, uid, generation, message, err := protocol.DecodeDeliverReq(data)
 	if err != nil {
 		return err
 	}
@@ -80,7 +82,8 @@ func (s *Server) deliver(conn *server.Conn, data []byte) error {
 		return errors.ErrIllegalRequest
 	}
 
-	if err = s.provider.Deliver(context.Background(), gid, nid, cid, uid, message); seq == 0 {
+	token := session.Token{UID: uid, Generation: generation}
+	if err = s.provider.Deliver(context.Background(), gid, nid, cid, uid, token, message); seq == 0 {
 		return err
 	} else {
 		return conn.Send(protocol.EncodeDeliverRes(seq, codes.ErrorToCode(err)))

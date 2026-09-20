@@ -5,6 +5,7 @@ import (
 
 	"github.com/dobyte/due/v2/cluster"
 	"github.com/dobyte/due/v2/log"
+	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/utils/xcall"
 )
 
@@ -138,7 +139,7 @@ func (r *Router) Group(groups ...func(group *RouterGroup)) *RouterGroup {
 	return group
 }
 
-func (r *Router) deliver(gid, nid, pid string, cid, uid int64, seq, route int32, data any) {
+func (r *Router) deliver(gid, nid, pid string, cid, uid int64, token session.Token, seq, route int32, data any) {
 	req := r.node.reqPool.Get().(*request)
 	req.ctx = context.Background()
 	req.gid = gid
@@ -146,6 +147,7 @@ func (r *Router) deliver(gid, nid, pid string, cid, uid int64, seq, route int32,
 	req.pid = pid
 	req.cid = cid
 	req.uid = uid
+	req.token = token
 	req.message.Seq = seq
 	req.message.Route = route
 	req.message.Data = data

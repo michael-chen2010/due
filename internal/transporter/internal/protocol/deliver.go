@@ -10,25 +10,26 @@ import (
 )
 
 const (
-	deliverReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b64 + b64
+	deliverReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b64 + b64 + b64
 	deliverResBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + defaultCodeBytes
 )
 
 // EncodeDeliverReq 编码投递消息请求
-// 协议：size + header + route + seq + cid + uid + <message packet>
-func EncodeDeliverReq(seq uint64, cid int64, uid int64, buf buffer.Buffer) *buffer.NocopyBuffer {
+// 协议：size + header + route + seq + cid + uid + generation + <message packet>
+func EncodeDeliverReq(seq uint64, cid int64, uid int64, generation uint64, buf buffer.Buffer) *buffer.NocopyBuffer {
 	writer := buffer.MallocWriter(deliverReqBytes)
 	writer.WriteUint32s(binary.BigEndian, uint32(deliverReqBytes-defaultSizeBytes+buf.Len()))
 	writer.WriteUint8s(dataBit)
 	writer.WriteUint8s(route.Deliver)
 	writer.WriteUint64s(binary.BigEndian, seq)
 	writer.WriteInt64s(binary.BigEndian, cid, uid)
+	writer.WriteUint64s(binary.BigEndian, generation)
 
 	return buffer.NewNocopyBuffer(writer, buf)
 }
 
 // DecodeDeliverReq 解码投递消息请求
-func DecodeDeliverReq(data []byte) (seq uint64, cid int64, uid int64, message []byte, err error) {
+func DecodeDeliverReq(data []byte) (seq uint64, cid int64, uid int64, generation uint64, message []byte, err error) {
 	reader := buffer.NewReader(data)
 
 	if _, err = reader.Seek(defaultSizeBytes+defaultHeaderBytes+defaultRouteBytes, io.SeekStart); err != nil {
@@ -44,6 +45,10 @@ func DecodeDeliverReq(data []byte) (seq uint64, cid int64, uid int64, message []
 	}
 
 	if uid, err = reader.ReadInt64(binary.BigEndian); err != nil {
+		return
+	}
+
+	if generation, err = reader.ReadUint64(binary.BigEndian); err != nil {
 		return
 	}
 

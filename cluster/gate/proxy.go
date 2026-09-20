@@ -9,6 +9,7 @@ import (
 	"github.com/dobyte/due/v2/log"
 	"github.com/dobyte/due/v2/mode"
 	"github.com/dobyte/due/v2/packet"
+	"github.com/dobyte/due/v2/session"
 )
 
 type proxy struct {
@@ -40,7 +41,8 @@ func (p *proxy) bindGate(ctx context.Context, cid, uid int64) error {
 		return err
 	}
 
-	p.trigger(ctx, cluster.Reconnect, cid, uid)
+	token, _ := p.gate.session.Token(session.Conn, cid)
+	p.trigger(ctx, cluster.Reconnect, cid, uid, token)
 
 	return nil
 }
@@ -56,7 +58,7 @@ func (p *proxy) unbindGate(ctx context.Context, cid, uid int64) error {
 }
 
 // 触发事件
-func (p *proxy) trigger(ctx context.Context, event cluster.Event, cid, uid int64) {
+func (p *proxy) trigger(ctx context.Context, event cluster.Event, cid, uid int64, token session.Token) {
 	if mode.IsDebugMode() {
 		log.Debugf("trigger event, event: %v cid: %d uid: %d", event.String(), cid, uid)
 	}
@@ -65,6 +67,7 @@ func (p *proxy) trigger(ctx context.Context, event cluster.Event, cid, uid int64
 		Event: event,
 		CID:   cid,
 		UID:   uid,
+		Token: token,
 	}); err != nil {
 		switch {
 		case errors.Is(err, errors.ErrNotFoundEvent), errors.Is(err, errors.ErrNotFoundUserLocation):
@@ -77,6 +80,7 @@ func (p *proxy) trigger(ctx context.Context, event cluster.Event, cid, uid int64
 
 // 投递消息
 func (p *proxy) deliver(ctx context.Context, cid, uid int64, data []byte) {
+	token, _ := p.gate.session.Token(session.Conn, cid)
 	message, err := packet.UnpackMessage(data)
 	if err != nil {
 		log.Errorf("unpack message failed: %v", err)
@@ -86,6 +90,7 @@ func (p *proxy) deliver(ctx context.Context, cid, uid int64, data []byte) {
 	if err = p.nodeLinker.Deliver(ctx, &link.DeliverArgs{
 		CID:    cid,
 		UID:    uid,
+		Token:  token,
 		Route:  message.Route,
 		Buffer: data,
 	}); err != nil {

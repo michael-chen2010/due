@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/dobyte/due/v2/cluster"
+	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/utils/xcall"
 )
 
@@ -207,7 +208,7 @@ func (a *Actor) Push(uid int64, message *cluster.Message) error {
 		return err
 	}
 
-	a.scheduler.node.router.deliver("", a.scheduler.node.opts.id, a.PID(), 0, uid, message.Seq, message.Route, buf)
+	a.scheduler.node.router.deliver("", a.scheduler.node.opts.id, a.PID(), 0, uid, session.Token{}, message.Seq, message.Route, buf)
 
 	return nil
 }

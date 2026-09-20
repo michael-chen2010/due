@@ -19,6 +19,7 @@ type event struct {
 	gid     string          // 网关ID
 	cid     int64           // 连接ID
 	uid     int64           // 用户ID
+	token   session.Token   // 会话绑定令牌
 	event   cluster.Event   // 时间类型
 	version atomic.Int32    // 对象版本号
 	chain   *chains.Chain   // defer 调用链
@@ -43,6 +44,11 @@ func (e *event) CID() int64 {
 // UID 获取用户ID
 func (e *event) UID() int64 {
 	return e.uid
+}
+
+// SessionToken 获取当前事件携带的会话绑定令牌
+func (e *event) SessionToken() session.Token {
+	return e.token
 }
 
 // Seq 获取消息序列号
@@ -105,11 +111,12 @@ func (e *event) compareVersionExecDefer(version int32) {
 // Clone 克隆Context
 func (e *event) Clone() Context {
 	c := &event{
-		node: e.node,
-		gid:  e.gid,
-		cid:  e.cid,
-		uid:  e.uid,
-		ctx:  context.Background(),
+		node:  e.node,
+		gid:   e.gid,
+		cid:   e.cid,
+		uid:   e.uid,
+		token: e.token,
+		ctx:   context.Background(),
 	}
 
 	c.actor.Store(e.actor.Load())
@@ -403,6 +410,8 @@ func (e *event) compareVersionRecycle(version int32) {
 
 // 重置事件对象
 func (e *event) reset() {
+	e.token = session.Token{}
+
 	if e.chain != nil {
 		e.chain.Cancel()
 		e.chain = nil

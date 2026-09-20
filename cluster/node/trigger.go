@@ -2,8 +2,10 @@ package node
 
 import (
 	"context"
+
 	"github.com/dobyte/due/v2/cluster"
 	"github.com/dobyte/due/v2/log"
+	"github.com/dobyte/due/v2/session"
 	"github.com/dobyte/due/v2/utils/xcall"
 )
 
@@ -23,13 +25,14 @@ func newTrigger(node *Node) *Trigger {
 	}
 }
 
-func (e *Trigger) trigger(kind cluster.Event, gid string, cid, uid int64) {
+func (e *Trigger) trigger(kind cluster.Event, gid string, cid, uid int64, token session.Token) {
 	evt := e.node.evtPool.Get().(*event)
 	evt.ctx = context.Background()
 	evt.event = kind
 	evt.gid = gid
 	evt.cid = cid
 	evt.uid = uid
+	evt.token = token
 	e.evtChan <- evt
 }
 

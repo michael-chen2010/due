@@ -149,15 +149,17 @@ func (g *Gate) handleConnect(conn network.Conn) {
 	g.session.AddConn(conn)
 
 	cid, uid := conn.ID(), conn.UID()
+	token, _ := g.session.Token(session.Conn, cid)
 
-	g.proxy.trigger(g.ctx, cluster.Connect, cid, uid)
+	g.proxy.trigger(g.ctx, cluster.Connect, cid, uid, token)
 }
 
 // 处理断开连接
 func (g *Gate) handleDisconnect(conn network.Conn) {
-	g.session.RemConn(conn)
-
 	cid, uid := conn.ID(), conn.UID()
+	token, _ := g.session.Token(session.Conn, cid)
+
+	g.session.RemConn(conn)
 
 	if uid != 0 {
 		ctx, cancel := context.WithTimeout(g.ctx, 3*time.Second)
@@ -165,7 +167,7 @@ func (g *Gate) handleDisconnect(conn network.Conn) {
 		cancel()
 	}
 
-	g.proxy.trigger(g.ctx, cluster.Disconnect, cid, uid)
+	g.proxy.trigger(g.ctx, cluster.Disconnect, cid, uid, token)
 
 	g.wg.Done()
 }

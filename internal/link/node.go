@@ -199,13 +199,13 @@ func (l *NodeLinker) Deliver(ctx context.Context, args *DeliverArgs) error {
 			buf.Release()
 			return err
 		} else {
-			return client.Deliver(ctx, args.CID, args.UID, buf)
+			return client.Deliver(ctx, args.CID, args.UID, args.Token, buf)
 		}
 	} else {
 		if _, err = l.doRPC(ctx, args.Route, args.UID, func(ctx context.Context, client *node.Client) (bool, any, error) {
 			isDeliver = true
 
-			return false, nil, client.Deliver(ctx, args.CID, args.UID, buf)
+			return false, nil, client.Deliver(ctx, args.CID, args.UID, args.Token, buf)
 		}); err != nil {
 			if !isDeliver {
 				buf.Release()
@@ -236,7 +236,7 @@ func (l *NodeLinker) Trigger(ctx context.Context, args *TriggerArgs) error {
 				return err
 			}
 
-			if err = client.Trigger(ctx, args.Event, args.CID, args.UID); err != nil {
+			if err = client.Trigger(ctx, args.Event, args.CID, args.UID, args.Token); err != nil {
 				return err
 			}
 

@@ -11,16 +11,17 @@ import (
 )
 
 const (
-	triggerReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b8 + b64 + b64
+	triggerReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b8 + b64 + b64 + b64
 	triggerResBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + defaultCodeBytes
 )
 
 // EncodeTriggerReq 编码触发事件请求
-// 协议：size + header + route + seq + event + cid + [uid]
-func EncodeTriggerReq(seq uint64, event cluster.Event, cid int64, uid ...int64) *buffer.NocopyBuffer {
+// 协议：size + header + route + seq + event + cid + [uid + generation]
+func EncodeTriggerReq(seq uint64, event cluster.Event, cid, uid int64, generation uint64) *buffer.NocopyBuffer {
 	size := triggerReqBytes - defaultSizeBytes
-	if len(uid) == 0 || uid[0] == 0 {
-		size -= b64
+	if uid == 0 {
+		size -= b64 + b64
+		generation = 0
 	}
 
 	writer := buffer.MallocWriter(triggerReqBytes)
@@ -31,17 +32,18 @@ func EncodeTriggerReq(seq uint64, event cluster.Event, cid int64, uid ...int64) 
 	writer.WriteUint8s(uint8(event))
 	writer.WriteInt64s(binary.BigEndian, cid)
 
-	if len(uid) > 0 && uid[0] != 0 {
-		writer.WriteInt64s(binary.BigEndian, uid[0])
+	if uid != 0 {
+		writer.WriteInt64s(binary.BigEndian, uid)
+		writer.WriteUint64s(binary.BigEndian, generation)
 	}
 
 	return buffer.NewNocopyBuffer(writer)
 }
 
 // DecodeTriggerReq 解码触发事件请求
-// 协议：size + header + route + seq + event + cid + [uid]
-func DecodeTriggerReq(data []byte) (seq uint64, event cluster.Event, cid int64, uid int64, err error) {
-	if len(data) != triggerReqBytes && len(data) != triggerReqBytes-b64 {
+// 协议：size + header + route + seq + event + cid + [uid + generation]
+func DecodeTriggerReq(data []byte) (seq uint64, event cluster.Event, cid int64, uid int64, generation uint64, err error) {
+	if len(data) != triggerReqBytes && len(data) != triggerReqBytes-b64-b64 {
 		err = errors.ErrInvalidMessage
 		return
 	}
@@ -68,7 +70,10 @@ func DecodeTriggerReq(data []byte) (seq uint64, event cluster.Event, cid int64, 
 	}
 
 	if len(data) == triggerReqBytes {
-		uid, err = reader.ReadInt64(binary.BigEndian)
+		if uid, err = reader.ReadInt64(binary.BigEndian); err != nil {
+			return
+		}
+		generation, err = reader.ReadUint64(binary.BigEndian)
 	}
 
 	return

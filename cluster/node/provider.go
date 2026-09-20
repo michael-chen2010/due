@@ -5,6 +5,7 @@ import (
 	"github.com/dobyte/due/v2/cluster"
 	"github.com/dobyte/due/v2/errors"
 	"github.com/dobyte/due/v2/packet"
+	"github.com/dobyte/due/v2/session"
 )
 
 type provider struct {
@@ -12,14 +13,14 @@ type provider struct {
 }
 
 // Trigger 触发事件
-func (p *provider) Trigger(ctx context.Context, gid string, cid, uid int64, event cluster.Event) error {
-	p.node.trigger.trigger(event, gid, cid, uid)
+func (p *provider) Trigger(ctx context.Context, gid string, cid, uid int64, token session.Token, event cluster.Event) error {
+	p.node.trigger.trigger(event, gid, cid, uid, token)
 
 	return nil
 }
 
 // Deliver 投递消息
-func (p *provider) Deliver(ctx context.Context, gid, nid string, cid, uid int64, message []byte) error {
+func (p *provider) Deliver(ctx context.Context, gid, nid string, cid, uid int64, token session.Token, message []byte) error {
 	msg, err := packet.UnpackMessage(message)
 	if err != nil {
 		return err
@@ -47,7 +48,7 @@ func (p *provider) Deliver(ctx context.Context, gid, nid string, cid, uid int64,
 		}
 	}
 
-	p.node.router.deliver(gid, nid, "", cid, uid, msg.Seq, msg.Route, msg.Buffer)
+	p.node.router.deliver(gid, nid, "", cid, uid, token, msg.Seq, msg.Route, msg.Buffer)
 
 	return nil
 }

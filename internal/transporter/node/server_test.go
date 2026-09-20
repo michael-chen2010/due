@@ -9,6 +9,7 @@ import (
 	"github.com/dobyte/due/v2/internal/transporter/internal/server"
 	"github.com/dobyte/due/v2/internal/transporter/node"
 	"github.com/dobyte/due/v2/log"
+	"github.com/dobyte/due/v2/session"
 )
 
 func TestServer(t *testing.T) {
@@ -30,12 +31,12 @@ type provider struct {
 }
 
 // Trigger 触发事件
-func (p *provider) Trigger(ctx context.Context, gid string, cid, uid int64, event cluster.Event) error {
+func (p *provider) Trigger(ctx context.Context, gid string, cid, uid int64, token session.Token, event cluster.Event) error {
 	return nil
 }
 
 // Deliver 投递消息
-func (p *provider) Deliver(ctx context.Context, gid, nid string, cid, uid int64, message []byte) error {
+func (p *provider) Deliver(ctx context.Context, gid, nid string, cid, uid int64, token session.Token, message []byte) error {
 	log.Infof("gid: %s, nid: %s, cid: %d, uid: %d message: %s", gid, nid, cid, uid, string(message))
 	return nil
 }

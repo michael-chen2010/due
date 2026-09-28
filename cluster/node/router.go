@@ -141,8 +141,15 @@ func (r *Router) Group(groups ...func(group *RouterGroup)) *RouterGroup {
 }
 
 func (r *Router) deliver(gid, nid, pid string, cid, uid int64, token session.Token, seq, route int32, data any) {
+	r.deliverWithContext(context.Background(), gid, nid, pid, cid, uid, token, seq, route, data)
+}
+
+func (r *Router) deliverWithContext(ctx context.Context, gid, nid, pid string, cid, uid int64, token session.Token, seq, route int32, data any) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	req := r.node.reqPool.Get().(*request)
-	req.ctx = context.Background()
+	req.ctx = ctx
 	req.gid = gid
 	req.nid = nid
 	req.pid = pid

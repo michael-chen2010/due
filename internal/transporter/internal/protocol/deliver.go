@@ -3,33 +3,80 @@ package protocol
 import (
 	"encoding/binary"
 	"io"
+	"time"
 
+	"github.com/dobyte/due/v2/cluster"
 	"github.com/dobyte/due/v2/core/buffer"
 	"github.com/dobyte/due/v2/errors"
 	"github.com/dobyte/due/v2/internal/transporter/internal/route"
 )
 
 const (
-	deliverReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b64 + b64 + b64
+	deliverReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b64 + b64 + b64 + b64 + b16
 	deliverResBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + defaultCodeBytes
 )
 
-// EncodeDeliverReq 编码投递消息请求
-// 协议：size + header + route + seq + cid + uid + generation + <message packet>
+// EncodeDeliverReq 编码投递消息请求。
+// 兼容旧调用方：metadata 使用零值。
 func EncodeDeliverReq(seq uint64, cid int64, uid int64, generation uint64, buf buffer.Buffer) *buffer.NocopyBuffer {
-	writer := buffer.MallocWriter(deliverReqBytes)
-	writer.WriteUint32s(binary.BigEndian, uint32(deliverReqBytes-defaultSizeBytes+buf.Len()))
+	return EncodeDeliverReqWithMetadata(seq, cid, uid, generation, cluster.RequestMetadata{}, buf)
+}
+
+// EncodeDeliverReqWithMetadata 编码投递消息请求。
+// 协议：size + header + route + seq + cid + uid + generation +
+// deadline_unix_ms + correlation_id_len + correlation_id + <message packet>
+func EncodeDeliverReqWithMetadata(
+	seq uint64,
+	cid int64,
+	uid int64,
+	generation uint64,
+	metadata cluster.RequestMetadata,
+	buf buffer.Buffer,
+) *buffer.NocopyBuffer {
+	correlationID := metadata.CorrelationID
+	size := deliverReqBytes + len(correlationID)
+
+	var deadlineUnixMilli int64
+	if !metadata.Deadline.IsZero() {
+		deadlineUnixMilli = metadata.Deadline.UnixMilli()
+	}
+
+	writer := buffer.MallocWriter(size)
+	writer.WriteUint32s(binary.BigEndian, uint32(size-defaultSizeBytes+buf.Len()))
 	writer.WriteUint8s(dataBit)
 	writer.WriteUint8s(route.Deliver)
 	writer.WriteUint64s(binary.BigEndian, seq)
 	writer.WriteInt64s(binary.BigEndian, cid, uid)
 	writer.WriteUint64s(binary.BigEndian, generation)
+	writer.WriteInt64s(binary.BigEndian, deadlineUnixMilli)
+	writer.WriteUint16s(binary.BigEndian, uint16(len(correlationID)))
+	writer.WriteString(correlationID)
 
 	return buffer.NewNocopyBuffer(writer, buf)
 }
 
-// DecodeDeliverReq 解码投递消息请求
+// DecodeDeliverReq 解码投递消息请求。
+// 兼容旧调用方：metadata 被丢弃。
 func DecodeDeliverReq(data []byte) (seq uint64, cid int64, uid int64, generation uint64, message []byte, err error) {
+	seq, cid, uid, generation, _, message, err = DecodeDeliverReqWithMetadata(data)
+	return
+}
+
+// DecodeDeliverReqWithMetadata 解码投递消息请求。
+func DecodeDeliverReqWithMetadata(data []byte) (
+	seq uint64,
+	cid int64,
+	uid int64,
+	generation uint64,
+	metadata cluster.RequestMetadata,
+	message []byte,
+	err error,
+) {
+	if len(data) < deliverReqBytes {
+		err = errors.ErrInvalidMessage
+		return
+	}
+
 	reader := buffer.NewReader(data)
 
 	if _, err = reader.Seek(defaultSizeBytes+defaultHeaderBytes+defaultRouteBytes, io.SeekStart); err != nil {
@@ -52,7 +99,29 @@ func DecodeDeliverReq(data []byte) (seq uint64, cid int64, uid int64, generation
 		return
 	}
 
-	message = data[deliverReqBytes:]
+	var deadlineUnixMilli int64
+	if deadlineUnixMilli, err = reader.ReadInt64(binary.BigEndian); err != nil {
+		return
+	}
+	if deadlineUnixMilli != 0 {
+		metadata.Deadline = time.UnixMilli(deadlineUnixMilli)
+	}
+
+	var correlationBytes uint16
+	if correlationBytes, err = reader.ReadUint16(binary.BigEndian); err != nil {
+		return
+	}
+	if int(correlationBytes) > len(data)-deliverReqBytes {
+		err = errors.ErrInvalidMessage
+		return
+	}
+	if correlationBytes > 0 {
+		if metadata.CorrelationID, err = reader.ReadString(int(correlationBytes)); err != nil {
+			return
+		}
+	}
+
+	message = data[deliverReqBytes+int(correlationBytes):]
 
 	return
 }

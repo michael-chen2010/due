@@ -199,13 +199,13 @@ func (l *NodeLinker) Deliver(ctx context.Context, args *DeliverArgs) error {
 			buf.Release()
 			return err
 		} else {
-			return client.Deliver(ctx, args.CID, args.UID, args.Token, buf)
+			return client.DeliverWithMetadata(ctx, args.CID, args.UID, args.Token, args.Metadata, buf)
 		}
 	} else {
 		if _, err = l.doRPC(ctx, args.Route, args.UID, func(ctx context.Context, client *node.Client) (bool, any, error) {
 			isDeliver = true
 
-			return false, nil, client.Deliver(ctx, args.CID, args.UID, args.Token, buf)
+			return false, nil, client.DeliverWithMetadata(ctx, args.CID, args.UID, args.Token, args.Metadata, buf)
 		}); err != nil {
 			if !isDeliver {
 				buf.Release()

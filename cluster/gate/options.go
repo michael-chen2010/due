@@ -55,24 +55,26 @@ const (
 type Option func(o *options)
 
 type options struct {
-	ctx               context.Context        // 上下文
-	id                string                 // 实例ID
-	name              string                 // 实例名称
-	server            network.Server         // 网关服务器
-	locator           locate.Locator         // 用户定位器
-	registry          registry.Registry      // 服务注册器
-	ownershipStore    session.OwnershipStore // 分布式会话所有权存储器
-	dispatch          cluster.Dispatch       // 无状态路由消息分发策略
-	metadata          map[string]string      // 元数据
-	addr              string                 // 内部RPC监听地址
-	expose            bool                   // 内部RPC是否暴露到公网
-	connNum           int                    // 内部RPC拨号连接数
-	callTimeout       time.Duration          // 内部RPC调用超时时间
-	dialTimeout       time.Duration          // 内部RPC拨号超时时间
-	dialRetryTimes    int                    // 内部RPC拨号重试次数
-	writeTimeout      time.Duration          // 内部RPC写入超时时间
-	writeQueueSize    int32                  // 内部RPC写入队列大小
-	faultRecoveryTime time.Duration          // 内部RPC故障恢复时间
+	ctx                    context.Context        // 上下文
+	id                     string                 // 实例ID
+	name                   string                 // 实例名称
+	server                 network.Server         // 网关服务器
+	locator                locate.Locator         // 用户定位器
+	registry               registry.Registry      // 服务注册器
+	ownershipStore         session.OwnershipStore // 分布式会话所有权存储器
+	dispatch               cluster.Dispatch       // 无状态路由消息分发策略
+	metadata               map[string]string      // 元数据
+	addr                   string                 // 内部RPC监听地址
+	expose                 bool                   // 内部RPC是否暴露到公网
+	connNum                int                    // 内部RPC拨号连接数
+	callTimeout            time.Duration          // 内部RPC调用超时时间
+	requestTimeout         time.Duration          // 业务请求端到端截止时间；零值表示不生成 deadline
+	correlationIDGenerator func() string          // 请求关联ID生成器；nil 表示不生成
+	dialTimeout            time.Duration          // 内部RPC拨号超时时间
+	dialRetryTimes         int                    // 内部RPC拨号重试次数
+	writeTimeout           time.Duration          // 内部RPC写入超时时间
+	writeQueueSize         int32                  // 内部RPC写入队列大小
+	faultRecoveryTime      time.Duration          // 内部RPC故障恢复时间
 }
 
 func defaultOptions() *options {
@@ -279,6 +281,22 @@ func WithCallTimeout(callTimeout time.Duration) Option {
 			log.Warnf("the specified callTimeout is less than zero and will be ignored")
 		}
 	}
+}
+
+// WithRequestTimeout 设置客户端业务请求的端到端截止时间。零值表示禁用。
+func WithRequestTimeout(requestTimeout time.Duration) Option {
+	return func(o *options) {
+		if requestTimeout >= 0 {
+			o.requestTimeout = requestTimeout
+		} else {
+			log.Warnf("the specified requestTimeout is less than zero and will be ignored")
+		}
+	}
+}
+
+// WithCorrelationIDGenerator 设置客户端业务请求的关联ID生成器。
+func WithCorrelationIDGenerator(generator func() string) Option {
+	return func(o *options) { o.correlationIDGenerator = generator }
 }
 
 // WithDialTimeout 设置拨号超时时间

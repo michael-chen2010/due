@@ -63,7 +63,7 @@ func (s *Server) trigger(conn *server.Conn, data []byte) error {
 
 // 投递消息
 func (s *Server) deliver(conn *server.Conn, data []byte) error {
-	seq, cid, uid, generation, message, err := protocol.DecodeDeliverReq(data)
+	seq, cid, uid, generation, metadata, message, err := protocol.DecodeDeliverReqWithMetadata(data)
 	if err != nil {
 		return err
 	}
@@ -82,8 +82,10 @@ func (s *Server) deliver(conn *server.Conn, data []byte) error {
 		return errors.ErrIllegalRequest
 	}
 
+	providerCtx := cluster.WithRequestMetadata(context.Background(), metadata)
+
 	token := session.Token{UID: uid, Generation: generation}
-	if err = s.provider.Deliver(context.Background(), gid, nid, cid, uid, token, message); seq == 0 {
+	if err = s.provider.Deliver(providerCtx, gid, nid, cid, uid, token, message); seq == 0 {
 		return err
 	} else {
 		return conn.Send(protocol.EncodeDeliverRes(seq, codes.ErrorToCode(err)))

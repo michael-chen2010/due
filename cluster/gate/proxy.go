@@ -79,7 +79,7 @@ func (p *proxy) trigger(ctx context.Context, event cluster.Event, cid, uid int64
 }
 
 // 投递消息
-func (p *proxy) deliver(ctx context.Context, cid, uid int64, data []byte) {
+func (p *proxy) deliver(ctx context.Context, cid, uid int64, metadata cluster.RequestMetadata, data []byte) {
 	token, _ := p.gate.session.Token(session.Conn, cid)
 	message, err := packet.UnpackMessage(data)
 	if err != nil {
@@ -88,11 +88,12 @@ func (p *proxy) deliver(ctx context.Context, cid, uid int64, data []byte) {
 	}
 
 	if err = p.nodeLinker.Deliver(ctx, &link.DeliverArgs{
-		CID:    cid,
-		UID:    uid,
-		Token:  token,
-		Route:  message.Route,
-		Buffer: data,
+		CID:      cid,
+		UID:      uid,
+		Token:    token,
+		Metadata: metadata,
+		Route:    message.Route,
+		Buffer:   data,
 	}); err != nil {
 		switch {
 		case errors.Is(err, errors.ErrNotFoundRoute), errors.Is(err, errors.ErrNotFoundEndpoint):

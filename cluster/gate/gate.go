@@ -175,11 +175,23 @@ func (g *Gate) handleDisconnect(conn network.Conn) {
 	g.wg.Done()
 }
 
+func (g *Gate) newRequestMetadata() cluster.RequestMetadata {
+	metadata := cluster.RequestMetadata{}
+	if g.opts.requestTimeout > 0 {
+		metadata.Deadline = time.Now().Add(g.opts.requestTimeout)
+	}
+	if g.opts.correlationIDGenerator != nil {
+		metadata.CorrelationID = g.opts.correlationIDGenerator()
+	}
+	return metadata
+}
+
 // 处理接收到的消息
 func (g *Gate) handleReceive(conn network.Conn, data []byte) {
 	cid, uid := conn.ID(), conn.UID()
+	metadata := g.newRequestMetadata()
 
-	g.proxy.deliver(g.ctx, cid, uid, data)
+	g.proxy.deliver(g.ctx, cid, uid, metadata, data)
 }
 
 // 启动传输服务器

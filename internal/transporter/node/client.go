@@ -28,9 +28,14 @@ func (c *Client) Trigger(ctx context.Context, event cluster.Event, cid, uid int6
 	return c.cli.Send(ctx, protocol.EncodeTriggerReq(0, event, cid, uid, token.Generation), cid)
 }
 
-// Deliver 投递消息
+// Deliver 投递消息；兼容旧调用方，metadata 使用零值。
 func (c *Client) Deliver(ctx context.Context, cid, uid int64, token session.Token, buf buffer.Buffer) error {
-	return c.cli.Send(ctx, protocol.EncodeDeliverReq(0, cid, uid, token.Generation, buf), cid)
+	return c.DeliverWithMetadata(ctx, cid, uid, token, cluster.RequestMetadata{}, buf)
+}
+
+// DeliverWithMetadata 投递消息并显式携带请求 deadline/correlation metadata。
+func (c *Client) DeliverWithMetadata(ctx context.Context, cid, uid int64, token session.Token, metadata cluster.RequestMetadata, buf buffer.Buffer) error {
+	return c.cli.Send(ctx, protocol.EncodeDeliverReqWithMetadata(0, cid, uid, token.Generation, metadata, buf), cid)
 }
 
 // GetState 获取状态

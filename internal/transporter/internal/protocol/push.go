@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	pushReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b8 + b64
+	pushReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b8 + b64 + b64 + b64
 	pushResBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + defaultCodeBytes
 )
 
 // EncodePushReq 编码推送请求
-// 协议：size + header + route + seq + session kind + target + <message packet>
-func EncodePushReq(seq uint64, kind session.Kind, target int64, disconnect bool, message buffer.Buffer) *buffer.NocopyBuffer {
+// 协议：size + header + route + seq + session kind + target + token uid + token generation + <message packet>
+func EncodePushReq(seq uint64, kind session.Kind, target int64, disconnect bool, token session.Token, message buffer.Buffer) *buffer.NocopyBuffer {
 	writer := buffer.MallocWriter(pushReqBytes)
 	writer.WriteUint32s(binary.BigEndian, uint32(pushReqBytes-defaultSizeBytes+message.Len()))
 	if disconnect {
@@ -29,13 +29,15 @@ func EncodePushReq(seq uint64, kind session.Kind, target int64, disconnect bool,
 	writer.WriteUint64s(binary.BigEndian, seq)
 	writer.WriteUint8s(uint8(kind))
 	writer.WriteInt64s(binary.BigEndian, target)
+	writer.WriteInt64s(binary.BigEndian, token.UID)
+	writer.WriteUint64s(binary.BigEndian, token.Generation)
 
 	return buffer.NewNocopyBuffer(writer, message)
 }
 
 // DecodePushReq 解码推送消息
-// 协议：size + header + route + seq + session kind + target + <message packet>
-func DecodePushReq(data []byte) (seq uint64, kind session.Kind, target int64, disconnect bool, message []byte, err error) {
+// 协议：size + header + route + seq + session kind + target + token uid + token generation + <message packet>
+func DecodePushReq(data []byte) (seq uint64, kind session.Kind, target int64, disconnect bool, token session.Token, message []byte, err error) {
 	reader := buffer.NewReader(data)
 
 	if _, err = reader.Seek(defaultSizeBytes, io.SeekStart); err != nil {
@@ -65,6 +67,12 @@ func DecodePushReq(data []byte) (seq uint64, kind session.Kind, target int64, di
 	}
 
 	if target, err = reader.ReadInt64(binary.BigEndian); err != nil {
+		return
+	}
+	if token.UID, err = reader.ReadInt64(binary.BigEndian); err != nil {
+		return
+	}
+	if token.Generation, err = reader.ReadUint64(binary.BigEndian); err != nil {
 		return
 	}
 

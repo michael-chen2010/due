@@ -139,10 +139,10 @@ func (c *Client) Disconnect(ctx context.Context, kind session.Kind, target int64
 }
 
 // Push 推送消息
-func (c *Client) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, message buffer.Buffer, ack bool) error {
+func (c *Client) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message buffer.Buffer, ack bool) error {
 	if ack {
 		seq := c.doGenSequence()
-		buf := protocol.EncodePushReq(seq, kind, target, disconnect, message)
+		buf := protocol.EncodePushReq(seq, kind, target, disconnect, token, message)
 
 		res, err := c.cli.Call(ctx, seq, buf)
 		if err != nil {
@@ -157,7 +157,7 @@ func (c *Client) Push(ctx context.Context, kind session.Kind, target int64, disc
 
 		return codes.CodeToError(code)
 	} else {
-		return c.cli.Send(ctx, protocol.EncodePushReq(0, kind, target, disconnect, message), target)
+		return c.cli.Send(ctx, protocol.EncodePushReq(0, kind, target, disconnect, token, message), target)
 	}
 }
 

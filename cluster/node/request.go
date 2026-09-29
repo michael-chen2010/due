@@ -392,6 +392,7 @@ func (r *request) Reply(message *cluster.Message) error {
 			GID:     r.gid,
 			Kind:    session.Conn,
 			Target:  r.cid,
+			Token:   r.token,
 			Message: message,
 		})
 	case r.pid != "": // 来源于Actor

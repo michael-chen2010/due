@@ -53,7 +53,7 @@ func (p *provider) IsOnline(ctx context.Context, kind session.Kind, target int64
 }
 
 // Push 发送消息（异步）
-func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, message []byte) error {
+func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message []byte) error {
 	return nil
 }
 

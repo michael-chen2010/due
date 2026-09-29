@@ -20,7 +20,7 @@ func TestEncodePushReq(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	buf := protocol.EncodePushReq(1, session.User, 3, true, buffer.NewNocopyBuffer(message))
+	buf := protocol.EncodePushReq(1, session.User, 3, true, session.Token{UID: 3, Generation: 7}, buffer.NewNocopyBuffer(message))
 
 	t.Log(buf.Bytes())
 }
@@ -35,9 +35,9 @@ func TestDecodePushReq(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	buf := protocol.EncodePushReq(1, session.User, 3, true, buffer.NewNocopyBuffer(message))
+	buf := protocol.EncodePushReq(1, session.User, 3, true, session.Token{UID: 3, Generation: 7}, buffer.NewNocopyBuffer(message))
 
-	seq, kind, target, disconnect, msg, err := protocol.DecodePushReq(buf.Bytes())
+	seq, kind, target, disconnect, token, msg, err := protocol.DecodePushReq(buf.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +46,9 @@ func TestDecodePushReq(t *testing.T) {
 	t.Logf("kind: %v", kind)
 	t.Logf("target: %v", target)
 	t.Logf("disconnect: %v", disconnect)
+	if token != (session.Token{UID: 3, Generation: 7}) {
+		t.Fatalf("token=%+v, want uid=3 generation=7", token)
+	}
 	t.Logf("message: %v", len(msg))
 }
 

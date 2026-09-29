@@ -143,12 +143,12 @@ func (s *Server) disconnect(conn *server.Conn, data []byte) error {
 
 // 推送单个消息
 func (s *Server) push(conn *server.Conn, data []byte) error {
-	seq, kind, target, disconnect, message, err := protocol.DecodePushReq(data)
+	seq, kind, target, disconnect, token, message, err := protocol.DecodePushReq(data)
 	if err != nil {
 		return err
 	}
 
-	err = s.provider.Push(context.Background(), kind, target, disconnect, message)
+	err = s.provider.Push(context.Background(), kind, target, disconnect, token, message)
 
 	if seq == 0 {
 		return err

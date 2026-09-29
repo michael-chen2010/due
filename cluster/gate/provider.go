@@ -80,7 +80,29 @@ func (p *provider) Disconnect(ctx context.Context, kind session.Kind, target int
 }
 
 // Push 发送消息
-func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, message []byte) error {
+func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message []byte) error {
+	if token != (session.Token{}) {
+		if kind != session.Conn || token.UID <= 0 || token.Generation == 0 {
+			return errors.ErrStaleSession
+		}
+		localToken, err := p.gate.session.Token(session.Conn, target)
+		if err != nil {
+			return err
+		}
+		if localToken != token || !p.gate.session.IsCurrent(token) {
+			return errors.ErrStaleSession
+		}
+		if p.gate.opts.ownershipStore != nil {
+			current, ok, err := p.gate.opts.ownershipStore.Current(ctx, token.UID)
+			if err != nil {
+				return err
+			}
+			if !ok || current != token {
+				return errors.ErrStaleSession
+			}
+		}
+	}
+
 	err := p.gate.session.Push(kind, target, disconnect, message)
 
 	if kind == session.User && errors.Is(err, errors.ErrNotFoundSession) {

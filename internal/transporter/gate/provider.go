@@ -21,7 +21,7 @@ type Provider interface {
 	// Disconnect 断开连接
 	Disconnect(ctx context.Context, kind session.Kind, target int64, force bool) error
 	// Push 发送消息
-	Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, message []byte) error
+	Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message []byte) error
 	// Multicast 推送组播消息
 	Multicast(ctx context.Context, kind session.Kind, targets []int64, disconnect bool, message []byte) (total int64, err error)
 	// Broadcast 推送广播消息

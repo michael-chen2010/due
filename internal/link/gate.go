@@ -327,21 +327,43 @@ func (l *GateLinker) doIndirectDisconnect(ctx context.Context, uid int64, force 
 
 // Push 推送消息
 func (l *GateLinker) Push(ctx context.Context, args *PushArgs) error {
-	_, err := l.Multicast(ctx, &cluster.MulticastArgs{
-		GID:     args.GID,
-		Kind:    args.Kind,
-		Targets: []int64{args.Target},
-		Message: args.Message,
-		Ack:     args.Ack,
-	})
-
-	return err
+	switch args.Kind {
+	case session.Conn:
+		client, err := l.doBuildClient(args.GID)
+		if err != nil {
+			return err
+		}
+		message, err := l.PackMessage(args.Message, true)
+		if err != nil {
+			return err
+		}
+		return client.Push(ctx, args.Kind, args.Target, args.Disconnect, args.Token, message, args.Ack)
+	case session.User:
+		if args.GID != "" {
+			client, err := l.doBuildClient(args.GID)
+			if err != nil {
+				return err
+			}
+			message, err := l.PackMessage(args.Message, true)
+			if err != nil {
+				return err
+			}
+			return client.Push(ctx, args.Kind, args.Target, args.Disconnect, args.Token, message, args.Ack)
+		}
+		message, err := l.PackMessage(args.Message, true)
+		if err != nil {
+			return err
+		}
+		return l.doPush(ctx, args.Kind, args.Target, args.Disconnect, args.Token, message, args.Ack)
+	default:
+		return errors.ErrInvalidSessionKind
+	}
 }
 
 // 执行推送消息
-func (l *GateLinker) doPush(ctx context.Context, kind session.Kind, target int64, disconnect bool, message buffer.Buffer, ack bool) error {
+func (l *GateLinker) doPush(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message buffer.Buffer, ack bool) error {
 	_, err := l.doRPC(ctx, target, func(client *gate.Client, index, total int) (bool, any, error) {
-		if err := client.Push(ctx, kind, target, disconnect, message, ack); ack {
+		if err := client.Push(ctx, kind, target, disconnect, token, message, ack); ack {
 			if errors.Is(err, errors.ErrNotFoundSession) {
 				return true, nil, err
 			} else {
@@ -399,7 +421,7 @@ func (l *GateLinker) doDirectMulticast(ctx context.Context, args *MulticastArgs)
 	}
 
 	if n == 1 {
-		if err := client.Push(ctx, args.Kind, args.Targets[0], args.Disconnect, message, args.Ack); err != nil {
+		if err := client.Push(ctx, args.Kind, args.Targets[0], args.Disconnect, session.Token{}, message, args.Ack); err != nil {
 			return 0, err
 		} else {
 			if args.Ack {
@@ -430,7 +452,7 @@ func (l *GateLinker) doIndirectMulticast(ctx context.Context, args *MulticastArg
 		message.Delay(int32(n * 2))
 
 		if n == 1 {
-			if err := l.doPush(ctx, args.Kind, args.Targets[0], args.Disconnect, message, args.Ack); err != nil {
+			if err := l.doPush(ctx, args.Kind, args.Targets[0], args.Disconnect, session.Token{}, message, args.Ack); err != nil {
 				return 0, err
 			} else {
 				return 1, nil
@@ -440,7 +462,7 @@ func (l *GateLinker) doIndirectMulticast(ctx context.Context, args *MulticastArg
 		}
 	} else {
 		if n == 1 {
-			return 0, l.doPush(ctx, args.Kind, args.Targets[0], args.Disconnect, message, args.Ack)
+			return 0, l.doPush(ctx, args.Kind, args.Targets[0], args.Disconnect, session.Token{}, message, args.Ack)
 		} else {
 			message.Delay(int32(n))
 
@@ -461,7 +483,7 @@ func (l *GateLinker) doMulticast(ctx context.Context, kind session.Kind, targets
 		target := targets[i]
 
 		eg.Go(func() error {
-			if err = l.doPush(ctx, kind, target, disconnect, message, ack); err != nil {
+			if err = l.doPush(ctx, kind, target, disconnect, session.Token{}, message, ack); err != nil {
 				return err
 			}
 

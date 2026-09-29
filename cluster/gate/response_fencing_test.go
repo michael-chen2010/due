@@ -27,6 +27,7 @@ type responseFenceConn struct {
 	id     int64
 	uid    int64
 	attr   responseFenceAttr
+	sends  int
 	pushes int
 }
 
@@ -37,7 +38,7 @@ func (c *responseFenceConn) UID() int64                    { return c.uid }
 func (c *responseFenceConn) Attr() network.Attr            { return &c.attr }
 func (c *responseFenceConn) Bind(uid int64)                { c.uid = uid }
 func (c *responseFenceConn) Unbind()                       { c.uid = 0 }
-func (c *responseFenceConn) Send([]byte) error             { return nil }
+func (c *responseFenceConn) Send([]byte) error             { c.sends++; return nil }
 func (c *responseFenceConn) Push([]byte) error             { c.pushes++; return nil }
 func (c *responseFenceConn) State() network.ConnState      { return network.ConnOpened }
 func (c *responseFenceConn) Close(...bool) error           { return nil }
@@ -72,14 +73,45 @@ func TestProviderPushRejectsResponseForStaleSessionToken(t *testing.T) {
 	if err := p.Push(context.Background(), session.Conn, oldConn.id, false, oldToken, []byte("old response")); !dueerrors.Is(err, dueerrors.ErrStaleSession) {
 		t.Fatalf("stale response push error=%v, want %v", err, dueerrors.ErrStaleSession)
 	}
-	if oldConn.pushes != 0 || newConn.pushes != 0 {
-		t.Fatalf("stale response delivered: old pushes=%d new pushes=%d", oldConn.pushes, newConn.pushes)
+	if oldConn.sends != 0 || oldConn.pushes != 0 || newConn.sends != 0 || newConn.pushes != 0 {
+		t.Fatalf(
+			"stale response delivered: old sends=%d pushes=%d new sends=%d pushes=%d",
+			oldConn.sends,
+			oldConn.pushes,
+			newConn.sends,
+			newConn.pushes,
+		)
 	}
 
 	if err := p.Push(context.Background(), session.Conn, newConn.id, false, newToken, []byte("current response")); err != nil {
 		t.Fatalf("current response push: %v", err)
 	}
-	if oldConn.pushes != 0 || newConn.pushes != 1 {
-		t.Fatalf("current response delivery: old pushes=%d new pushes=%d", oldConn.pushes, newConn.pushes)
+	if oldConn.sends != 0 || oldConn.pushes != 0 || newConn.sends != 1 || newConn.pushes != 0 {
+		t.Fatalf(
+			"current response delivery: old sends=%d pushes=%d new sends=%d pushes=%d; want response on Send only",
+			oldConn.sends,
+			oldConn.pushes,
+			newConn.sends,
+			newConn.pushes,
+		)
+	}
+}
+
+func TestProviderPushKeepsOrdinaryPushOnLowPriorityQueue(t *testing.T) {
+	manager := session.NewSession()
+	conn := &responseFenceConn{id: 201}
+	manager.AddConn(conn)
+	g := &Gate{opts: &options{}, session: manager}
+
+	p := &provider{gate: g}
+	if err := p.Push(context.Background(), session.Conn, conn.id, false, session.Token{}, []byte("ordinary push")); err != nil {
+		t.Fatalf("ordinary push: %v", err)
+	}
+	if conn.sends != 0 || conn.pushes != 1 {
+		t.Fatalf(
+			"ordinary push delivery: sends=%d pushes=%d; want Push only",
+			conn.sends,
+			conn.pushes,
+		)
 	}
 }

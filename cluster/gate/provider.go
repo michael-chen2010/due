@@ -101,6 +101,16 @@ func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, di
 				return errors.ErrStaleSession
 			}
 		}
+
+		// A non-zero token marks a request Response. Responses must use the
+		// high-priority Send path so ordinary Push traffic cannot starve them.
+		if err := p.gate.session.Send(kind, target, message); err != nil {
+			return err
+		}
+		if disconnect {
+			return p.gate.session.Close(kind, target)
+		}
+		return nil
 	}
 
 	err := p.gate.session.Push(kind, target, disconnect, message)

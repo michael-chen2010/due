@@ -47,21 +47,24 @@ type ServerOption func(o *serverOptions)
 type CheckOriginFunc func(r *http.Request) bool
 
 type serverOptions struct {
-	addr               string             // 监听地址
-	maxConnNum         int                // 最大连接数
-	certFile           string             // 证书文件
-	keyFile            string             // 秘钥文件
-	path               string             // 路径，默认为"/"
-	checkOrigin        CheckOriginFunc    // 跨域检测
-	writeTimeout       time.Duration      // 写入超时时间，默认无超时
-	writeQueueSize     int                // 写入队列大小，默认1024
-	heartbeatInterval  time.Duration      // 心跳间隔时间，默认10s
-	heartbeatMechanism HeartbeatMechanism // 心跳机制，默认resp
-	authorizeTimeout   time.Duration      // 授权超时时间，默认0s，不检测
+	addr                      string             // 监听地址
+	maxConnNum                int                // 最大连接数
+	certFile                  string             // 证书文件
+	keyFile                   string             // 秘钥文件
+	path                      string             // 路径，默认为"/"
+	checkOrigin               CheckOriginFunc    // 跨域检测
+	writeTimeout              time.Duration      // 写入超时时间，默认无超时
+	writeQueueSize            int                // 写入队列大小，默认1024
+	heartbeatInterval         time.Duration      // 心跳间隔时间，默认10s
+	heartbeatMechanism        HeartbeatMechanism // 心跳机制，默认resp
+	packetHeartbeatInspection bool               // 是否按Due packet检查心跳，默认开启
+	authorizeTimeout          time.Duration      // 授权超时时间，默认0s，不检测
 }
 
 func defaultServerOptions() *serverOptions {
-	opts := &serverOptions{}
+	opts := &serverOptions{
+		packetHeartbeatInspection: true,
+	}
 	opts.path = etc.Get(defaultServerPathKey, defaultServerPath).String()
 	opts.certFile = etc.Get(defaultServerCertFileKey).String()
 	opts.keyFile = etc.Get(defaultServerKeyFileKey).String()
@@ -207,6 +210,12 @@ func WithServerHeartbeatInterval(heartbeatInterval time.Duration) ServerOption {
 // WithServerHeartbeatMechanism 设置心跳机制
 func WithServerHeartbeatMechanism(heartbeatMechanism HeartbeatMechanism) ServerOption {
 	return func(o *serverOptions) { o.heartbeatMechanism = heartbeatMechanism }
+}
+
+// WithServerPacketHeartbeatInspection 设置是否使用Due packet格式识别心跳。
+// 默认开启以保持现有Due客户端/服务端协议兼容；公开自定义二进制协议可显式关闭。
+func WithServerPacketHeartbeatInspection(enabled bool) ServerOption {
+	return func(o *serverOptions) { o.packetHeartbeatInspection = enabled }
 }
 
 // WithServerAuthorizeTimeout 设置授权超时时间

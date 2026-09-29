@@ -353,8 +353,8 @@ func (c *serverConn) read() {
 				continue
 			}
 
-			// check heartbeat packet
-			isHeartbeat, err := packet.CheckHeartbeat(msgData)
+			// check heartbeat packet when the public protocol uses Due packet framing.
+			isHeartbeat, err := checkServerHeartbeat(c.connMgr.server.opts, msgData)
 			if err != nil {
 				log.Errorf("check heartbeat message error: %v", err)
 				continue
@@ -377,6 +377,13 @@ func (c *serverConn) read() {
 			}
 		}
 	}
+}
+
+func checkServerHeartbeat(opts *serverOptions, msgData []byte) (bool, error) {
+	if opts != nil && !opts.packetHeartbeatInspection {
+		return false, nil
+	}
+	return packet.CheckHeartbeat(msgData)
 }
 
 // 写入消息

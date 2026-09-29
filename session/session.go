@@ -297,6 +297,39 @@ func (s *Session) Send(kind Kind, target int64, message []byte) error {
 	return conn.Send(message)
 }
 
+// SendCurrent synchronously sends only when kind/target still resolves to the
+// connection identified by token. The local session binding cannot change
+// between the token check and Send.
+func (s *Session) SendCurrent(kind Kind, target int64, token Token, disconnect bool, message []byte) error {
+	if token.UID <= 0 || token.Generation == 0 {
+		return errors.ErrStaleSession
+	}
+
+	s.rw.RLock()
+	conn, err := s.conn(kind, target)
+	if err != nil {
+		s.rw.RUnlock()
+		return err
+	}
+
+	current, ok := s.users[token.UID]
+	if !ok || current != conn || s.tokens[conn.ID()] != token {
+		s.rw.RUnlock()
+		return errors.ErrStaleSession
+	}
+
+	err = conn.Send(message)
+	s.rw.RUnlock()
+	if err != nil {
+		return err
+	}
+
+	if disconnect {
+		return conn.Close()
+	}
+	return nil
+}
+
 // Push 推送消息（异步）
 func (s *Session) Push(kind Kind, target int64, disconnect bool, message []byte) error {
 	s.rw.RLock()

@@ -97,6 +97,76 @@ func TestProviderPushRejectsResponseForStaleSessionToken(t *testing.T) {
 	}
 }
 
+func TestProviderPushSupportsFencedUserDeliveryAndRejectsStaleGeneration(t *testing.T) {
+	const uid int64 = 9101
+	store := session.NewMemoryOwnershipStore()
+	manager := session.NewSession()
+	oldConn := &responseFenceConn{id: 301}
+	newConn := &responseFenceConn{id: 302}
+	manager.AddConn(oldConn)
+	manager.AddConn(newConn)
+	g := &Gate{opts: &options{ownershipStore: store}, session: manager}
+	p := &provider{gate: g}
+
+	oldToken, err := g.bindSession(context.Background(), oldConn.id, uid)
+	if err != nil {
+		t.Fatalf("bind old session: %v", err)
+	}
+	if err := p.Push(
+		context.Background(),
+		session.User,
+		uid,
+		false,
+		oldToken,
+		[]byte("current full sync"),
+	); err != nil {
+		t.Fatalf("current fenced user push: %v", err)
+	}
+	if oldConn.sends != 1 || oldConn.pushes != 0 {
+		t.Fatalf(
+			"current fenced user delivery: sends=%d pushes=%d; want Send only",
+			oldConn.sends,
+			oldConn.pushes,
+		)
+	}
+
+	newToken, err := g.bindSession(context.Background(), newConn.id, uid)
+	if err != nil {
+		t.Fatalf("bind replacement session: %v", err)
+	}
+	if newToken.Generation <= oldToken.Generation {
+		t.Fatalf(
+			"new generation=%d, want > old generation=%d",
+			newToken.Generation,
+			oldToken.Generation,
+		)
+	}
+	if err := p.Push(
+		context.Background(),
+		session.User,
+		uid,
+		false,
+		oldToken,
+		[]byte("stale full sync"),
+	); !dueerrors.Is(err, dueerrors.ErrStaleSession) {
+		t.Fatalf(
+			"stale fenced user push error=%v, want %v",
+			err,
+			dueerrors.ErrStaleSession,
+		)
+	}
+	if oldConn.sends != 1 || oldConn.pushes != 0 ||
+		newConn.sends != 0 || newConn.pushes != 0 {
+		t.Fatalf(
+			"stale fenced user delivery: old sends=%d pushes=%d new sends=%d pushes=%d",
+			oldConn.sends,
+			oldConn.pushes,
+			newConn.sends,
+			newConn.pushes,
+		)
+	}
+}
+
 func TestProviderPushKeepsOrdinaryPushOnLowPriorityQueue(t *testing.T) {
 	manager := session.NewSession()
 	conn := &responseFenceConn{id: 201}

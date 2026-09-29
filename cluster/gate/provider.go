@@ -82,14 +82,11 @@ func (p *provider) Disconnect(ctx context.Context, kind session.Kind, target int
 // Push 发送消息
 func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message []byte) error {
 	if token != (session.Token{}) {
-		if kind != session.Conn || token.UID <= 0 || token.Generation == 0 {
+		if (kind != session.Conn && kind != session.User) ||
+			token.UID <= 0 || token.Generation == 0 {
 			return errors.ErrStaleSession
 		}
-		localToken, err := p.gate.session.Token(session.Conn, target)
-		if err != nil {
-			return err
-		}
-		if localToken != token || !p.gate.session.IsCurrent(token) {
+		if kind == session.User && target != token.UID {
 			return errors.ErrStaleSession
 		}
 		if p.gate.opts.ownershipStore != nil {
@@ -102,15 +99,16 @@ func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, di
 			}
 		}
 
-		// A non-zero token marks a request Response. Responses must use the
-		// high-priority Send path so ordinary Push traffic cannot starve them.
-		if err := p.gate.session.Send(kind, target, message); err != nil {
-			return err
-		}
-		if disconnect {
-			return p.gate.session.Close(kind, target)
-		}
-		return nil
+		// A non-zero token marks a fenced final delivery. Request Responses
+		// and critical state repair Pushes use the high-priority Send path,
+		// while SendCurrent keeps the local generation check atomic with Send.
+		return p.gate.session.SendCurrent(
+			kind,
+			target,
+			token,
+			disconnect,
+			message,
+		)
 	}
 
 	err := p.gate.session.Push(kind, target, disconnect, message)

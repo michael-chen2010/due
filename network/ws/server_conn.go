@@ -298,6 +298,8 @@ func (c *serverConn) doClose(isNeedRecycle bool) error {
 
 	c.rw.Unlock()
 
+	c.discardQueuedTasks()
+
 	err := conn.Close()
 
 	if c.connMgr.server.disconnectHandler != nil {
@@ -364,9 +366,14 @@ func (c *serverConn) read() {
 			if isHeartbeat {
 				// responsive heartbeat
 				if c.connMgr.server.opts.heartbeatMechanism == RespHeartbeat {
+					heartbeat, packErr := packet.PackHeartbeat()
+					if packErr != nil {
+						log.Errorf("pack heartbeat message error: %v", packErr)
+						continue
+					}
 					c.rw.RLock()
 					if c.conn != nil {
-						c.doWriteToQueue(c.highPriorityQueue, heartbeatPacket)
+						_ = c.doWriteToQueue(c.highPriorityQueue, heartbeatPacket, heartbeat)
 					}
 					c.rw.RUnlock()
 				}
@@ -467,7 +474,7 @@ func (c *serverConn) doWrite(conn *websocket.Conn, t *task) bool {
 		return false
 	}
 
-	if t.typ == heartbeatPacket {
+	if t.typ == heartbeatPacket && len(t.msg) == 0 {
 		if msg, err := packet.PackHeartbeat(); err != nil {
 			log.Errorf("pack heartbeat message error: %v", err)
 			return true
@@ -520,19 +527,59 @@ func (c *serverConn) isClosed() bool {
 	return c.State() == network.ConnClosed
 }
 
+func (c *serverConn) discardQueuedTasks() {
+	c.discardQueue(c.highPriorityQueue)
+	c.discardQueue(c.lowPriorityQueue)
+}
+
+func (c *serverConn) discardQueue(queue chan *task) {
+	if queue == nil {
+		return
+	}
+	for {
+		select {
+		case t, ok := <-queue:
+			if !ok {
+				return
+			}
+			c.doRecycleToPool(t)
+		default:
+			return
+		}
+	}
+}
+
 // 回收任务到对象池
 func (c *serverConn) doRecycleToPool(t *task) {
+	if t == nil {
+		return
+	}
+	if c.connMgr != nil {
+		c.connMgr.writeBudget.release(t.queuedBytes, t.lowPriority)
+	}
 	t.msg = nil
+	t.queuedBytes = 0
+	t.lowPriority = false
 	c.taskPool.Put(t)
 }
 
 // 写入任务到队列
 func (c *serverConn) doWriteToQueue(queue chan *task, typ int8, msg ...[]byte) error {
+	var message []byte
+	if len(msg) > 0 {
+		message = msg[0]
+	}
+	lowPriority := queue == c.lowPriorityQueue
+	queuedBytes := int64(len(message))
+	if c.connMgr != nil && !c.connMgr.writeBudget.reserve(queuedBytes, lowPriority) {
+		return ErrWriteQueueBytesExceeded
+	}
+
 	t := c.taskPool.Get().(*task)
 	t.typ = typ
-	if len(msg) > 0 {
-		t.msg = msg[0]
-	}
+	t.msg = message
+	t.queuedBytes = queuedBytes
+	t.lowPriority = lowPriority
 
 	if c.connMgr.server.opts.writeTimeout > 0 && len(queue) == cap(queue) {
 		ctx, cancel := context.WithTimeout(context.Background(), c.connMgr.server.opts.writeTimeout)

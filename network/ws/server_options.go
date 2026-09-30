@@ -55,6 +55,8 @@ type serverOptions struct {
 	checkOrigin               CheckOriginFunc    // 跨域检测
 	writeTimeout              time.Duration      // 写入超时时间，默认无超时
 	writeQueueSize            int                // 写入队列大小，默认1024
+	maxWriteQueueBytes        int64              // Gate 级写队列总字节上限，0 表示不限制
+	highPriorityReserveBytes  int64              // 为高优先级写入保留的队列字节
 	heartbeatInterval         time.Duration      // 心跳间隔时间，默认10s
 	heartbeatMechanism        HeartbeatMechanism // 心跳机制，默认resp
 	packetHeartbeatInspection bool               // 是否按Due packet检查心跳，默认开启
@@ -192,6 +194,30 @@ func WithServerWriteQueueSize(writeQueueSize int) ServerOption {
 			o.writeQueueSize = writeQueueSize
 		} else {
 			log.Warnf("the specified writeQueueSize is less than zero and will be ignored")
+		}
+	}
+}
+
+// WithServerMaxWriteQueueBytes 设置 Gate 级所有连接共享的写队列字节硬上限。
+// 0 保持兼容，表示不启用字节上限。
+func WithServerMaxWriteQueueBytes(maxWriteQueueBytes int64) ServerOption {
+	return func(o *serverOptions) {
+		if maxWriteQueueBytes >= 0 {
+			o.maxWriteQueueBytes = maxWriteQueueBytes
+		} else {
+			log.Warnf("the specified maxWriteQueueBytes is less than zero and will be ignored")
+		}
+	}
+}
+
+// WithServerHighPriorityReserveBytes 为 Send/高优先级写入预留字节，
+// 防止低优先级 Push 消耗全部 Gate 写队列预算。
+func WithServerHighPriorityReserveBytes(highPriorityReserveBytes int64) ServerOption {
+	return func(o *serverOptions) {
+		if highPriorityReserveBytes >= 0 {
+			o.highPriorityReserveBytes = highPriorityReserveBytes
+		} else {
+			log.Warnf("the specified highPriorityReserveBytes is less than zero and will be ignored")
 		}
 	}
 }

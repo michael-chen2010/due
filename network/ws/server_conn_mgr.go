@@ -18,16 +18,21 @@ import (
 )
 
 type serverConnMgr struct {
-	id         atomic.Int64 // 连接ID
-	total      atomic.Int64 // 总连接数
-	server     *server      // 服务器
-	pool       sync.Pool    // 连接池
-	partitions []*partition // 连接管理
+	id          atomic.Int64      // 连接ID
+	total       atomic.Int64      // 总连接数
+	server      *server           // 服务器
+	writeBudget *writeQueueBudget // Gate 级共享写队列字节预算
+	pool        sync.Pool         // 连接池
+	partitions  []*partition      // 连接管理
 }
 
 func newConnMgr(server *server) *serverConnMgr {
 	cm := &serverConnMgr{}
 	cm.server = server
+	cm.writeBudget = newWriteQueueBudget(
+		server.opts.maxWriteQueueBytes,
+		server.opts.highPriorityReserveBytes,
+	)
 	cm.pool = sync.Pool{New: func() any { return &serverConn{taskPool: sync.Pool{New: func() any { return &task{} }}} }}
 	cm.partitions = make([]*partition, 10)
 

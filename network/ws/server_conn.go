@@ -351,7 +351,12 @@ func (c *serverConn) doClose(isNeedRecycle bool) error {
 
 // 读取消息
 func (c *serverConn) read() {
+	c.rw.RLock()
 	conn := c.conn
+	c.rw.RUnlock()
+	if conn == nil {
+		return
+	}
 
 	for {
 		select {
@@ -432,10 +437,14 @@ func checkServerHeartbeat(opts *serverOptions, msgData []byte) (bool, error) {
 // 写入消息
 // 由于gorilla/websocket库并发写入的限制，同时为了保证心跳能够优先下发到客户端，故而实现一个优先队列
 func (c *serverConn) write() {
-	var (
-		conn   = c.conn
-		ticker *time.Ticker
-	)
+	c.rw.RLock()
+	conn := c.conn
+	c.rw.RUnlock()
+	if conn == nil {
+		return
+	}
+
+	var ticker *time.Ticker
 
 	if c.connMgr.server.opts.heartbeatInterval > 0 {
 		ticker = time.NewTicker(c.connMgr.server.opts.heartbeatInterval)

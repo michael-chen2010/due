@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	"github.com/dobyte/due/v2/errors"
+	"github.com/dobyte/due/v2/network"
 	"github.com/dobyte/due/v2/utils/xcall"
 	"github.com/gorilla/websocket"
 )
@@ -63,18 +64,45 @@ func (cm *serverConnMgr) close() {
 
 // 分配连接
 func (cm *serverConnMgr) allocate(c *websocket.Conn) error {
-	if cm.total.Load() >= int64(cm.server.opts.maxConnNum) {
+	if !cm.reserve() {
 		return errors.ErrTooManyConnection
 	}
 
 	id := cm.id.Add(1)
 	conn := cm.pool.Get().(*serverConn)
 	conn.init(cm, id, c)
+
+	// init 会启动读写协程并同步触发 OnConnect；上层可能在 OnConnect
+	// 内立即关闭连接。此时连接尚未登记，recycle 找不到它，因此由
+	// allocate 负责归还预占槽位，并且不能再把已关闭连接登记进去。
+	//
+	// 对仍然打开的连接，在 conn.rw 下完成状态复核与登记。若读协程
+	// 已经把状态切到 Closed，它会等待同一把锁；登记完成后 recycle
+	// 就能正常找到连接并归还槽位。
+	conn.rw.Lock()
+	if conn.State() != network.ConnOpened {
+		conn.rw.Unlock()
+		cm.total.Add(-1)
+		return nil
+	}
 	index := int(reflect.ValueOf(c).Pointer()) % len(cm.partitions)
 	cm.partitions[index].store(c, conn)
-	cm.total.Add(1)
+	conn.rw.Unlock()
 
 	return nil
+}
+
+func (cm *serverConnMgr) reserve() bool {
+	maxConnNum := int64(cm.server.opts.maxConnNum)
+	for {
+		total := cm.total.Load()
+		if total >= maxConnNum {
+			return false
+		}
+		if cm.total.CompareAndSwap(total, total+1) {
+			return true
+		}
+	}
 }
 
 // 回收连接

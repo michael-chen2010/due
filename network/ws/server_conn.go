@@ -43,6 +43,11 @@ type serverConn struct {
 
 var _ network.Conn = &serverConn{}
 
+type websocketMessageWriter interface {
+	SetWriteDeadline(time.Time) error
+	WriteMessage(messageType int, data []byte) error
+}
+
 // ID 获取连接ID
 func (c *serverConn) ID() int64 {
 	return c.id
@@ -415,7 +420,7 @@ func (c *serverConn) write() {
 				return
 			}
 
-			if !c.doWrite(conn, t) {
+			if !c.handleQueuedWrite(conn, t) {
 				return
 			}
 		case t, ok := <-ticker.C:
@@ -433,7 +438,7 @@ func (c *serverConn) write() {
 					return
 				}
 
-				if !c.doWrite(conn, t) {
+				if !c.handleQueuedWrite(conn, t) {
 					return
 				}
 			case t, ok := <-c.lowPriorityQueue:
@@ -441,7 +446,7 @@ func (c *serverConn) write() {
 					return
 				}
 
-				if !c.doWrite(conn, t) {
+				if !c.handleQueuedWrite(conn, t) {
 					return
 				}
 			case t, ok := <-ticker.C:
@@ -457,8 +462,19 @@ func (c *serverConn) write() {
 	}
 }
 
+func (c *serverConn) handleQueuedWrite(conn websocketMessageWriter, t *task) bool {
+	closeSignal := t.typ == closeSig
+	if c.doWrite(conn, t) {
+		return true
+	}
+	if !closeSignal && !c.isClosed() {
+		_ = c.forceClose(true)
+	}
+	return false
+}
+
 // 执行写入操作
-func (c *serverConn) doWrite(conn *websocket.Conn, t *task) bool {
+func (c *serverConn) doWrite(conn websocketMessageWriter, t *task) bool {
 	defer c.doRecycleToPool(t)
 
 	if t.typ == closeSig {
@@ -483,15 +499,25 @@ func (c *serverConn) doWrite(conn *websocket.Conn, t *task) bool {
 		}
 	}
 
-	if err := conn.WriteMessage(websocket.BinaryMessage, t.msg); err != nil {
+	if err := c.writeMessage(conn, t.msg); err != nil {
 		if !errors.Is(err, net.ErrClosed) {
 			if _, ok := err.(*websocket.CloseError); !ok {
 				log.Errorf("write message error: %v", err)
 			}
 		}
+		return false
 	}
 
 	return true
+}
+
+func (c *serverConn) writeMessage(conn websocketMessageWriter, msg []byte) error {
+	if timeout := c.connMgr.server.opts.socketWriteTimeout; timeout > 0 {
+		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+	}
+	return conn.WriteMessage(websocket.BinaryMessage, msg)
 }
 
 // 处理心跳
@@ -512,8 +538,10 @@ func (c *serverConn) doHandleHeartbeat(conn *websocket.Conn, t time.Time) bool {
 				log.Errorf("pack heartbeat message error: %v", err)
 			} else {
 				// send heartbeat packet
-				if err := conn.WriteMessage(websocket.BinaryMessage, heartbeat); err != nil {
+				if err := c.writeMessage(conn, heartbeat); err != nil {
 					log.Errorf("write heartbeat message error: %v", err)
+					_ = c.forceClose(true)
+					return false
 				}
 			}
 		}

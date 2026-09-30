@@ -15,6 +15,7 @@ const (
 	defaultServerMaxConnNum         = 5000
 	defaultServerCheckOrigin        = "*"
 	defaultServerWriteTimeout       = "0s"
+	defaultServerSocketWriteTimeout = "0s"
 	defaultServerWriteQueueSize     = 1024
 	defaultServerHeartbeatInterval  = "10s"
 	defaultServerHeartbeatMechanism = "resp"
@@ -29,6 +30,7 @@ const (
 	defaultServerCertFileKey           = "etc.network.ws.server.certFile"
 	defaultServerMaxConnNumKey         = "etc.network.ws.server.maxConnNum"
 	defaultServerWriteTimeoutKey       = "etc.network.ws.server.writeTimeout"
+	defaultServerSocketWriteTimeoutKey = "etc.network.ws.server.socketWriteTimeout"
 	defaultServerWriteQueueSizeKey     = "etc.network.ws.server.writeQueueSize"
 	defaultServerHeartbeatIntervalKey  = "etc.network.ws.server.heartbeatInterval"
 	defaultServerHeartbeatMechanismKey = "etc.network.ws.server.heartbeatMechanism"
@@ -53,7 +55,8 @@ type serverOptions struct {
 	keyFile                   string             // 秘钥文件
 	path                      string             // 路径，默认为"/"
 	checkOrigin               CheckOriginFunc    // 跨域检测
-	writeTimeout              time.Duration      // 写入超时时间，默认无超时
+	writeTimeout              time.Duration      // 写入队列等待超时时间，默认无超时
+	socketWriteTimeout        time.Duration      // Socket 实际写入超时时间，默认无超时
 	writeQueueSize            int                // 写入队列大小，默认1024
 	maxWriteQueueBytes        int64              // Gate 级写队列总字节上限，0 表示不限制
 	highPriorityReserveBytes  int64              // 为高优先级写入保留的队列字节
@@ -87,6 +90,12 @@ func defaultServerOptions() *serverOptions {
 		opts.writeTimeout = writeTimeout
 	} else {
 		opts.writeTimeout = xconv.Duration(defaultServerWriteTimeout)
+	}
+
+	if socketWriteTimeout := etc.Get(defaultServerSocketWriteTimeoutKey, defaultServerSocketWriteTimeout).Duration(); socketWriteTimeout >= 0 {
+		opts.socketWriteTimeout = socketWriteTimeout
+	} else {
+		opts.socketWriteTimeout = xconv.Duration(defaultServerSocketWriteTimeout)
 	}
 
 	if writeQueueSize := etc.Get(defaultServerWriteQueueSizeKey, defaultServerWriteQueueSize).Int(); writeQueueSize > 0 {
@@ -183,6 +192,18 @@ func WithServerWriteTimeout(writeTimeout time.Duration) ServerOption {
 			o.writeTimeout = writeTimeout
 		} else {
 			log.Warnf("the specified writeTimeout is less than zero and will be ignored")
+		}
+	}
+}
+
+// WithServerSocketWriteTimeout 设置实际 WebSocket 写入的 deadline。
+// 0 保持兼容，表示不设置 socket write deadline。
+func WithServerSocketWriteTimeout(socketWriteTimeout time.Duration) ServerOption {
+	return func(o *serverOptions) {
+		if socketWriteTimeout >= 0 {
+			o.socketWriteTimeout = socketWriteTimeout
+		} else {
+			log.Warnf("the specified socketWriteTimeout is less than zero and will be ignored")
 		}
 	}
 }

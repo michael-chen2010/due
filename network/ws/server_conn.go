@@ -84,13 +84,21 @@ func (c *serverConn) Send(msg []byte) (err error) {
 	}
 
 	c.rw.RLock()
-	defer c.rw.RUnlock()
-
 	if c.conn == nil {
+		c.rw.RUnlock()
 		return errors.ErrConnectionClosed
 	}
+	err = c.doWriteToQueue(c.highPriorityQueue, dataPacket, msg)
+	c.rw.RUnlock()
 
-	return c.doWriteToQueue(c.highPriorityQueue, dataPacket, msg)
+	return c.handleHighPriorityEnqueueResult(err)
+}
+
+func (c *serverConn) handleHighPriorityEnqueueResult(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) && !c.isClosed() {
+		_ = c.forceClose(true)
+	}
+	return err
 }
 
 // Push 发送消息（异步）
@@ -609,7 +617,7 @@ func (c *serverConn) doWriteToQueue(queue chan *task, typ int8, msg ...[]byte) e
 	t.queuedBytes = queuedBytes
 	t.lowPriority = lowPriority
 
-	if c.connMgr.server.opts.writeTimeout > 0 && len(queue) == cap(queue) {
+	if c.connMgr.server.opts.writeTimeout > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), c.connMgr.server.opts.writeTimeout)
 		defer cancel()
 

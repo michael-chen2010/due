@@ -25,20 +25,21 @@ import (
 )
 
 type serverConn struct {
-	id                int64           // 连接ID
-	uid               atomic.Int64    // 用户ID
-	attr              *attr           // 连接属性
-	state             atomic.Int32    // 连接状态
-	connMgr           *serverConnMgr  // 连接管理
-	rw                sync.RWMutex    // 锁
-	conn              *websocket.Conn // WS源连接
-	taskPool          sync.Pool       // 任务对象池
-	lowPriorityQueue  chan *task      // 低优先级队列
-	highPriorityQueue chan *task      // 高优先级队列
-	done              chan struct{}   // 写入完成信号
-	close             chan struct{}   // 关闭信号
-	lastHeartbeatTime atomic.Int64    // 上次心跳时间
-	authorizeTimer    atomic.Value    // 授权定时器
+	id                         int64           // 连接ID
+	uid                        atomic.Int64    // 用户ID
+	attr                       *attr           // 连接属性
+	state                      atomic.Int32    // 连接状态
+	connMgr                    *serverConnMgr  // 连接管理
+	rw                         sync.RWMutex    // 锁
+	conn                       *websocket.Conn // WS源连接
+	taskPool                   sync.Pool       // 任务对象池
+	lowPriorityQueue           chan *task      // 低优先级队列
+	highPriorityQueue          chan *task      // 高优先级队列
+	done                       chan struct{}   // 写入完成信号
+	close                      chan struct{}   // 关闭信号
+	lastHeartbeatTime          atomic.Int64    // 上次心跳时间
+	authorizeTimer             atomic.Value    // 授权定时器
+	lowPriorityEnqueueTimeouts atomic.Int32    // 连续低优先级入队超时次数
 }
 
 var _ network.Conn = &serverConn{}
@@ -102,19 +103,39 @@ func (c *serverConn) handleHighPriorityEnqueueResult(err error) error {
 }
 
 // Push 发送消息（异步）
-func (c *serverConn) Push(msg []byte) error {
+func (c *serverConn) Push(msg []byte) (err error) {
 	if err := c.checkState(); err != nil {
 		return err
 	}
 
 	c.rw.RLock()
-	defer c.rw.RUnlock()
-
 	if c.conn == nil {
+		c.rw.RUnlock()
 		return errors.ErrConnectionClosed
 	}
+	err = c.doWriteToQueue(c.lowPriorityQueue, dataPacket, msg)
+	c.rw.RUnlock()
 
-	return c.doWriteToQueue(c.lowPriorityQueue, dataPacket, msg)
+	return c.handleLowPriorityEnqueueResult(err)
+}
+
+func (c *serverConn) handleLowPriorityEnqueueResult(err error) error {
+	if err == nil {
+		c.lowPriorityEnqueueTimeouts.Store(0)
+		return nil
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+
+	limit := c.connMgr.server.opts.slowConsumerEnqueueTimeoutLimit
+	if limit <= 0 {
+		return err
+	}
+	if c.lowPriorityEnqueueTimeouts.Add(1) >= int32(limit) && !c.isClosed() {
+		_ = c.forceClose(true)
+	}
+	return err
 }
 
 // State 获取连接状态
@@ -199,6 +220,7 @@ func (c *serverConn) init(cm *serverConnMgr, id int64, conn *websocket.Conn) {
 	c.close = make(chan struct{})
 	c.lastHeartbeatTime.Store(xtime.Now().UnixNano())
 	c.authorizeTimer.Store((*time.Timer)(nil))
+	c.lowPriorityEnqueueTimeouts.Store(0)
 
 	xcall.Go(c.read)
 
@@ -214,6 +236,7 @@ func (c *serverConn) init(cm *serverConnMgr, id int64, conn *websocket.Conn) {
 // 重置连接
 func (c *serverConn) reset() {
 	c.attr = nil
+	c.lowPriorityEnqueueTimeouts.Store(0)
 }
 
 // 检测连接状态

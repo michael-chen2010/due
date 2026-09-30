@@ -49,21 +49,22 @@ type ServerOption func(o *serverOptions)
 type CheckOriginFunc func(r *http.Request) bool
 
 type serverOptions struct {
-	addr                      string             // 监听地址
-	maxConnNum                int                // 最大连接数
-	certFile                  string             // 证书文件
-	keyFile                   string             // 秘钥文件
-	path                      string             // 路径，默认为"/"
-	checkOrigin               CheckOriginFunc    // 跨域检测
-	writeTimeout              time.Duration      // 写入队列等待超时时间，默认无超时
-	socketWriteTimeout        time.Duration      // Socket 实际写入超时时间，默认无超时
-	writeQueueSize            int                // 写入队列大小，默认1024
-	maxWriteQueueBytes        int64              // Gate 级写队列总字节上限，0 表示不限制
-	highPriorityReserveBytes  int64              // 为高优先级写入保留的队列字节
-	heartbeatInterval         time.Duration      // 心跳间隔时间，默认10s
-	heartbeatMechanism        HeartbeatMechanism // 心跳机制，默认resp
-	packetHeartbeatInspection bool               // 是否按Due packet检查心跳，默认开启
-	authorizeTimeout          time.Duration      // 授权超时时间，默认0s，不检测
+	addr                            string             // 监听地址
+	maxConnNum                      int                // 最大连接数
+	certFile                        string             // 证书文件
+	keyFile                         string             // 秘钥文件
+	path                            string             // 路径，默认为"/"
+	checkOrigin                     CheckOriginFunc    // 跨域检测
+	writeTimeout                    time.Duration      // 写入队列等待超时时间，默认无超时
+	socketWriteTimeout              time.Duration      // Socket 实际写入超时时间，默认无超时
+	writeQueueSize                  int                // 写入队列大小，默认1024
+	maxWriteQueueBytes              int64              // Gate 级写队列总字节上限，0 表示不限制
+	highPriorityReserveBytes        int64              // 为高优先级写入保留的队列字节
+	slowConsumerEnqueueTimeoutLimit int                // 低优先级连续入队超时达到该次数后关闭连接，0 表示禁用
+	heartbeatInterval               time.Duration      // 心跳间隔时间，默认10s
+	heartbeatMechanism              HeartbeatMechanism // 心跳机制，默认resp
+	packetHeartbeatInspection       bool               // 是否按Due packet检查心跳，默认开启
+	authorizeTimeout                time.Duration      // 授权超时时间，默认0s，不检测
 }
 
 func defaultServerOptions() *serverOptions {
@@ -239,6 +240,18 @@ func WithServerHighPriorityReserveBytes(highPriorityReserveBytes int64) ServerOp
 			o.highPriorityReserveBytes = highPriorityReserveBytes
 		} else {
 			log.Warnf("the specified highPriorityReserveBytes is less than zero and will be ignored")
+		}
+	}
+}
+
+// WithServerSlowConsumerEnqueueTimeoutLimit 设置低优先级 Push 连续入队超时阈值。
+// 达到阈值后连接会被强制关闭；0 保持兼容，表示禁用该自动关闭策略。
+func WithServerSlowConsumerEnqueueTimeoutLimit(limit int) ServerOption {
+	return func(o *serverOptions) {
+		if limit >= 0 {
+			o.slowConsumerEnqueueTimeoutLimit = limit
+		} else {
+			log.Warnf("the specified slowConsumerEnqueueTimeoutLimit is less than zero and will be ignored")
 		}
 	}
 }

@@ -25,6 +25,7 @@ import (
 const (
 	defaultPIDKey                 = "etc.pid"                 // 进程文件路径
 	defaultShutdownMaxWaitTimeKey = "etc.shutdownMaxWaitTime" // 容器关闭最大等待时间
+	defaultDestroyMaxWaitTime     = 5 * time.Second
 )
 
 type Container struct {
@@ -95,7 +96,11 @@ func (c *Container) doDestroyComponents() {
 		g.Add(comp.Destroy)
 	}
 
-	g.Run(context.Background(), 5*time.Second)
+	timeout := etc.Get(defaultShutdownMaxWaitTimeKey).Duration()
+	if timeout <= 0 {
+		timeout = defaultDestroyMaxWaitTime
+	}
+	g.Run(context.Background(), timeout)
 }
 
 // 等待系统信号

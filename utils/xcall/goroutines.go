@@ -21,9 +21,9 @@ func (g *Goroutines) Add(fns ...func()) *Goroutines {
 }
 
 // Run 运行协程函数
-func (g *Goroutines) Run(ctx context.Context, timeout ...time.Duration) {
+func (g *Goroutines) Run(ctx context.Context, timeout ...time.Duration) error {
 	if len(g.fns) == 0 {
-		return
+		return nil
 	}
 
 	if len(timeout) > 0 && timeout[0] > 0 {
@@ -51,6 +51,8 @@ func (g *Goroutines) Run(ctx context.Context, timeout ...time.Duration) {
 
 	select {
 	case <-ctx.Done():
+		return ctx.Err()
 	case <-done:
+		return nil
 	}
 }

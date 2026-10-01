@@ -174,13 +174,19 @@ func (l *NodeLinker) FetchNodeList(ctx context.Context, states ...cluster.State)
 // Deliver 投递消息给节点处理
 func (l *NodeLinker) Deliver(ctx context.Context, args *DeliverArgs) error {
 	var (
-		err       error
-		buf       buffer.Buffer
-		isDeliver bool
+		err          error
+		buf          buffer.Buffer
+		retryBytes   []byte
+		deliverTries int
+		isDeliver    bool
 	)
 
 	switch b := args.Buffer.(type) {
 	case []byte:
+		// Gate delivery enters here with the immutable inbound frame. Keep the
+		// slice so a pre-queue transport failure can rebuild one retry buffer
+		// after the first NocopyBuffer has been consumed/released.
+		retryBytes = b
 		buf = buffer.NewNocopyBuffer(b)
 	case buffer.Buffer:
 		buf = b
@@ -204,8 +210,25 @@ func (l *NodeLinker) Deliver(ctx context.Context, args *DeliverArgs) error {
 	} else {
 		if _, err = l.doRPC(ctx, args.Route, args.UID, func(ctx context.Context, client *node.Client) (bool, any, error) {
 			isDeliver = true
+			deliverTries++
 
-			return false, nil, client.DeliverWithMetadata(ctx, args.CID, args.UID, args.Token, args.Metadata, buf)
+			deliverErr := client.DeliverWithMetadata(
+				ctx,
+				args.CID,
+				args.UID,
+				args.Token,
+				args.Metadata,
+				buf,
+			)
+			if deliverErr != nil && deliverTries == 1 && retryBytes != nil {
+				// Send errors happen before the frame is queued to the node
+				// transport, so execution has not started. Rebuild the
+				// consumed NocopyBuffer, let doRPC evict a stale stateful
+				// source, and resolve the authoritative locator once more.
+				buf = buffer.NewNocopyBuffer(retryBytes)
+				return true, nil, deliverErr
+			}
+			return false, nil, deliverErr
 		}); err != nil {
 			if !isDeliver {
 				buf.Release()
@@ -312,6 +335,10 @@ func (l *NodeLinker) doRPC(ctx context.Context, routeID int32, uid int64, fn fun
 		}
 
 		if client, err = l.builder.Build(ep.Address()); err != nil {
+			if route.Stateful() && prev != "" {
+				l.doDeleteSource(uid, route.Group(), prev)
+				continue
+			}
 			return nil, err
 		}
 

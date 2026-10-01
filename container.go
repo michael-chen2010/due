@@ -56,9 +56,13 @@ func (c *Container) Serve(once ...bool) {
 		c.doWaitSystemSignal()
 	}
 
-	c.doCloseComponents()
+	if err := c.doCloseComponents(); err != nil {
+		log.Errorf("container close components exceeded shutdown deadline: %v", err)
+	}
 
-	c.doDestroyComponents()
+	if err := c.doDestroyComponents(); err != nil {
+		log.Errorf("container destroy components exceeded shutdown deadline: %v", err)
+	}
 
 	c.doClearModules()
 }
@@ -78,18 +82,21 @@ func (c *Container) doStartComponents() {
 }
 
 // 关闭所有组件
-func (c *Container) doCloseComponents() {
+func (c *Container) doCloseComponents() error {
 	g := xcall.NewGoroutines()
 
 	for _, comp := range c.components {
 		g.Add(comp.Close)
 	}
 
-	g.Run(context.Background(), etc.Get(defaultShutdownMaxWaitTimeKey).Duration())
+	return g.Run(
+		context.Background(),
+		etc.Get(defaultShutdownMaxWaitTimeKey).Duration(),
+	)
 }
 
 // 销毁所有组件
-func (c *Container) doDestroyComponents() {
+func (c *Container) doDestroyComponents() error {
 	g := xcall.NewGoroutines()
 
 	for _, comp := range c.components {
@@ -100,7 +107,7 @@ func (c *Container) doDestroyComponents() {
 	if timeout <= 0 {
 		timeout = defaultDestroyMaxWaitTime
 	}
-	g.Run(context.Background(), timeout)
+	return g.Run(context.Background(), timeout)
 }
 
 // 等待系统信号

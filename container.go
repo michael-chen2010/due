@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -30,16 +31,41 @@ const (
 
 type Container struct {
 	components []component.Component
+
+	shutdownInit sync.Once
+	shutdownOnce sync.Once
+	shutdownCh   chan struct{}
 }
 
 // NewContainer 创建一个容器
 func NewContainer() *Container {
-	return &Container{}
+	c := &Container{}
+	c.shutdownSignal()
+	return c
 }
 
 // Add 添加组件
 func (c *Container) Add(components ...component.Component) {
 	c.components = append(c.components, components...)
+}
+
+// Shutdown 请求容器按正常 Close -> Destroy 生命周期退出。
+func (c *Container) Shutdown() {
+	if c == nil {
+		return
+	}
+
+	ch := c.shutdownSignal()
+	c.shutdownOnce.Do(func() {
+		close(ch)
+	})
+}
+
+func (c *Container) shutdownSignal() chan struct{} {
+	c.shutdownInit.Do(func() {
+		c.shutdownCh = make(chan struct{})
+	})
+	return c.shutdownCh
 }
 
 // Serve 启动容器
@@ -125,11 +151,14 @@ func (c *Container) doWaitSystemSignal() {
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGABRT, syscall.SIGKILL, syscall.SIGTERM)
 	}
 
-	s := <-sig
+	select {
+	case s := <-sig:
+		log.Warnf("process got signal %v, container will close", s)
+	case <-c.shutdownSignal():
+		log.Warn("container shutdown requested, container will close")
+	}
 
 	signal.Stop(sig)
-
-	log.Warnf("process got signal %v, container will close", s)
 }
 
 // 清理所有模块

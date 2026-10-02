@@ -110,9 +110,13 @@ func (c *Container) doDestroyComponents() error {
 	return g.Run(context.Background(), timeout)
 }
 
+func newSignalChannel() chan os.Signal {
+	return make(chan os.Signal, 1)
+}
+
 // 等待系统信号
 func (c *Container) doWaitSystemSignal() {
-	sig := make(chan os.Signal)
+	sig := newSignalChannel()
 
 	switch runtime.GOOS {
 	case `windows`:

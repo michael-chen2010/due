@@ -77,6 +77,11 @@ func (p *Proxy) SetState(state cluster.State) error {
 	return p.node.setState(state)
 }
 
+// UpdateMetadata 合并更新当前节点元数据并刷新已注册实例。
+func (p *Proxy) UpdateMetadata(metadata map[string]string) error {
+	return p.node.updateMetadata(metadata)
+}
+
 // Router 路由器
 func (p *Proxy) Router() *Router {
 	return p.node.router

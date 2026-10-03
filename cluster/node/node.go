@@ -358,10 +358,20 @@ func (n *Node) deregisterServiceInstances() {
 
 // 执行注册操作
 func (n *Node) doRegisterServiceInstances() error {
+	n.rw.RLock()
+	instances := cloneServiceInstances(n.instances)
+	n.rw.RUnlock()
+
+	return n.registerServiceInstanceSnapshots(instances)
+}
+
+func (n *Node) registerServiceInstanceSnapshots(
+	instances []*registry.ServiceInstance,
+) error {
 	eg, ctx := errgroup.WithContext(n.ctx)
 
-	for i := range n.instances {
-		instance := n.instances[i]
+	for i := range instances {
+		instance := instances[i]
 		eg.Go(func() error {
 			tctx, tcancel := context.WithTimeout(ctx, 3*time.Second)
 			defer tcancel()
@@ -374,11 +384,63 @@ func (n *Node) doRegisterServiceInstances() error {
 
 // 执行刷新实例状态操作
 func (n *Node) doRefreshServiceInstances() error {
+	n.rw.Lock()
 	for _, instance := range n.instances {
 		instance.State = n.getState().String()
 	}
+	n.rw.Unlock()
 
 	return n.doRegisterServiceInstances()
+}
+
+func (n *Node) updateMetadata(metadata map[string]string) error {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	n.rw.Lock()
+	if n.opts.metadata == nil {
+		n.opts.metadata = make(map[string]string, len(metadata))
+	}
+	for key, value := range metadata {
+		n.opts.metadata[key] = value
+	}
+	for _, instance := range n.instances {
+		instance.Metadata = cloneMetadata(n.opts.metadata)
+	}
+	instances := cloneServiceInstances(n.instances)
+	n.rw.Unlock()
+
+	if len(instances) == 0 {
+		return nil
+	}
+	return n.registerServiceInstanceSnapshots(instances)
+}
+
+func cloneServiceInstances(
+	instances []*registry.ServiceInstance,
+) []*registry.ServiceInstance {
+	clones := make([]*registry.ServiceInstance, 0, len(instances))
+	for _, instance := range instances {
+		if instance == nil {
+			continue
+		}
+		clone := *instance
+		clone.Metadata = cloneMetadata(instance.Metadata)
+		clones = append(clones, &clone)
+	}
+	return clones
+}
+
+func cloneMetadata(metadata map[string]string) map[string]string {
+	if metadata == nil {
+		return nil
+	}
+	clone := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		clone[key] = value
+	}
+	return clone
 }
 
 // 获取状态

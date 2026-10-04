@@ -126,6 +126,14 @@ func (r *Router) CheckRouteStateful(route int32) (stateful bool, exist bool) {
 	return
 }
 
+// CheckRouteAuthorized 是否为授权路由
+func (r *Router) CheckRouteAuthorized(route int32) (authorized bool, exist bool) {
+	if entity, ok := r.routes[route]; ok {
+		exist, authorized = ok, entity.options.Authorized
+	}
+	return
+}
+
 // Group 路由组
 func (r *Router) Group(groups ...func(group *RouterGroup)) *RouterGroup {
 	group := &RouterGroup{

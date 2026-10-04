@@ -51,6 +51,7 @@ func (b *Builder) UpdateStates(instances []*registry.ServiceInstance) {
 		for _, service := range instance.Services {
 			if state, ok := states[service]; ok {
 				state.Addresses = append(state.Addresses, resolver.Address{Addr: ep.Address(), ServerName: service})
+				states[service] = state
 			} else {
 				states[service] = resolver.State{Addresses: []resolver.Address{{Addr: ep.Address(), ServerName: service}}}
 			}

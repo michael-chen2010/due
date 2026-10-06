@@ -10,6 +10,8 @@ import (
 type RequestMetadata struct {
 	Deadline      time.Time
 	CorrelationID string
+	TraceParent   string
+	TraceState    string
 }
 
 type requestMetadataContextKey struct{}

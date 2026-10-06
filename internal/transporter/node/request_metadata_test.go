@@ -89,6 +89,8 @@ func TestDeliverCarriesRequestMetadataAcrossTransport(t *testing.T) {
 	meta := cluster.RequestMetadata{
 		Deadline:      deadline,
 		CorrelationID: "corr-transport-123",
+		TraceParent:   "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+		TraceState:    "vendor=value",
 	}
 	err = client.DeliverWithMetadata(
 		context.Background(),
@@ -109,6 +111,9 @@ func TestDeliverCarriesRequestMetadataAcrossTransport(t *testing.T) {
 		}
 		if got.Deadline.UnixMilli() != meta.Deadline.UnixMilli() {
 			t.Fatalf("deadline=%v, want %v", got.Deadline, meta.Deadline)
+		}
+		if got.TraceParent != meta.TraceParent || got.TraceState != meta.TraceState {
+			t.Fatalf("trace context=(%q,%q), want (%q,%q)", got.TraceParent, got.TraceState, meta.TraceParent, meta.TraceState)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("provider did not receive request metadata")

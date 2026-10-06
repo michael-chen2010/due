@@ -183,6 +183,9 @@ func (g *Gate) newRequestMetadata() cluster.RequestMetadata {
 	if g.opts.correlationIDGenerator != nil {
 		metadata.CorrelationID = g.opts.correlationIDGenerator()
 	}
+	if g.opts.traceContextGenerator != nil {
+		metadata.TraceParent, metadata.TraceState = g.opts.traceContextGenerator(metadata)
+	}
 	return metadata
 }
 

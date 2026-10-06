@@ -9,9 +9,10 @@ const (
 )
 
 const (
-	dataBit       uint8 = 0 << 7 // 数据标识位
-	heartbeatBit  uint8 = 1 << 7 // 心跳标识位
-	disconnectBit uint8 = 1 << 6 // 断连标识位
+	dataBit         uint8 = 0 << 7 // 数据标识位
+	heartbeatBit    uint8 = 1 << 7 // 心跳标识位
+	disconnectBit   uint8 = 1 << 6 // 断连标识位
+	traceContextBit uint8 = 1 << 5 // Deliver 请求携带 Trace Context 扩展
 )
 
 const (

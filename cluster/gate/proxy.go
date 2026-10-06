@@ -79,12 +79,12 @@ func (p *proxy) trigger(ctx context.Context, event cluster.Event, cid, uid int64
 }
 
 // 投递消息
-func (p *proxy) deliver(ctx context.Context, cid, uid int64, metadata cluster.RequestMetadata, data []byte) {
+func (p *proxy) deliver(ctx context.Context, cid, uid int64, metadata cluster.RequestMetadata, data []byte) error {
 	token, _ := p.gate.session.Token(session.Conn, cid)
 	message, err := packet.UnpackMessage(data)
 	if err != nil {
 		log.Errorf("unpack message failed: %v", err)
-		return
+		return err
 	}
 
 	if err = p.nodeLinker.Deliver(ctx, &link.DeliverArgs{
@@ -101,11 +101,12 @@ func (p *proxy) deliver(ctx context.Context, cid, uid int64, metadata cluster.Re
 		default:
 			log.Errorf("deliver message failed, cid: %d uid: %d seq: %d route: %d err: %v", cid, uid, message.Seq, message.Route, err)
 		}
-	} else {
-		if mode.IsDebugMode() {
-			log.Debugf("deliver message success, cid: %d uid: %d seq: %d route: %d", cid, uid, message.Seq, message.Route)
-		}
+		return err
 	}
+	if mode.IsDebugMode() {
+		log.Debugf("deliver message success, cid: %d uid: %d seq: %d route: %d", cid, uid, message.Seq, message.Route)
+	}
+	return nil
 }
 
 // 开始监听

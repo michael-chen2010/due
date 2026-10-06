@@ -16,9 +16,9 @@ func TestRequestMetadataUsesConfiguredTraceContextGenerator(t *testing.T) {
 	var generatorInput cluster.RequestMetadata
 	g := NewGate(
 		WithCorrelationIDGenerator(func() string { return correlationID }),
-		WithTraceContextGenerator(func(metadata cluster.RequestMetadata) (string, string) {
+		WithTraceContextGenerator(func(metadata cluster.RequestMetadata) (string, string, func(error)) {
 			generatorInput = metadata
-			return traceParent, traceState
+			return traceParent, traceState, nil
 		}),
 	)
 	defer g.cancel()

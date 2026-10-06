@@ -176,6 +176,11 @@ func (g *Gate) handleDisconnect(conn network.Conn) {
 }
 
 func (g *Gate) newRequestMetadata() cluster.RequestMetadata {
+	metadata, _ := g.newRequestMetadataWithTraceLifecycle()
+	return metadata
+}
+
+func (g *Gate) newRequestMetadataWithTraceLifecycle() (cluster.RequestMetadata, func(error)) {
 	metadata := cluster.RequestMetadata{}
 	if g.opts.requestTimeout > 0 {
 		metadata.Deadline = time.Now().Add(g.opts.requestTimeout)
@@ -183,18 +188,32 @@ func (g *Gate) newRequestMetadata() cluster.RequestMetadata {
 	if g.opts.correlationIDGenerator != nil {
 		metadata.CorrelationID = g.opts.correlationIDGenerator()
 	}
+	var complete func(error)
 	if g.opts.traceContextGenerator != nil {
-		metadata.TraceParent, metadata.TraceState = g.opts.traceContextGenerator(metadata)
+		metadata.TraceParent, metadata.TraceState, complete = g.opts.traceContextGenerator(metadata)
 	}
-	return metadata
+	return metadata, complete
+}
+
+func completeTraceContextLifecycle(complete func(error), err error) {
+	if complete == nil {
+		return
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Errorf("trace context completion callback panic: %v", recovered)
+		}
+	}()
+	complete(err)
 }
 
 // 处理接收到的消息
 func (g *Gate) handleReceive(conn network.Conn, data []byte) {
 	cid, uid := conn.ID(), conn.UID()
-	metadata := g.newRequestMetadata()
+	metadata, completeTrace := g.newRequestMetadataWithTraceLifecycle()
 
-	g.proxy.deliver(g.ctx, cid, uid, metadata, data)
+	err := g.proxy.deliver(g.ctx, cid, uid, metadata, data)
+	completeTraceContextLifecycle(completeTrace, err)
 }
 
 // 启动传输服务器

@@ -32,6 +32,7 @@ type serverConn struct {
 	connMgr                    *serverConnMgr  // 连接管理
 	rw                         sync.RWMutex    // 锁
 	conn                       *websocket.Conn // WS源连接
+	workers                    sync.WaitGroup  // 当前连接生命周期的读写协程
 	taskPool                   sync.Pool       // 任务对象池
 	lowPriorityQueue           chan *task      // 低优先级队列
 	highPriorityQueue          chan *task      // 高优先级队列
@@ -222,9 +223,15 @@ func (c *serverConn) init(cm *serverConnMgr, id int64, conn *websocket.Conn) {
 	c.authorizeTimer.Store((*time.Timer)(nil))
 	c.lowPriorityEnqueueTimeouts.Store(0)
 
-	xcall.Go(c.read)
-
-	xcall.Go(c.write)
+	c.workers.Add(2)
+	xcall.Go(func() {
+		defer c.workers.Done()
+		c.read()
+	})
+	xcall.Go(func() {
+		defer c.workers.Done()
+		c.write()
+	})
 
 	c.checkAuthorize()
 

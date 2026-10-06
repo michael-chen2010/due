@@ -109,9 +109,12 @@ func (cm *serverConnMgr) reserve() bool {
 func (cm *serverConnMgr) recycle(c *websocket.Conn) {
 	index := int(reflect.ValueOf(c).Pointer()) % len(cm.partitions)
 	if conn, ok := cm.partitions[index].delete(c); ok {
-		conn.reset()
-		cm.pool.Put(conn)
 		cm.total.Add(-1)
+		xcall.Go(func() {
+			conn.workers.Wait()
+			conn.reset()
+			cm.pool.Put(conn)
+		})
 	}
 }
 

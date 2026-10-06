@@ -138,6 +138,8 @@ func (s *Scheduler) removeActor(actor *Actor) bool {
 func (s *Scheduler) removeActorLocked(actor *Actor) {
 	s.actors.Delete(actor.PID())
 
+	s.rw.Lock()
+	defer s.rw.Unlock()
 	for _, relations := range s.relations {
 		if a, ok := relations[actor.Kind()]; ok && a == actor {
 			delete(relations, actor.Kind())

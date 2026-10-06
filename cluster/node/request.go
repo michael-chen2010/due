@@ -200,6 +200,14 @@ func (r *request) Context() context.Context {
 	return r.ctx
 }
 
+// SetContext 替换上下文。
+func (r *request) SetContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.ctx = ctx
+}
+
 // SetValue 为上下文设置值
 func (r *request) SetValue(key, val any) {
 	r.ctx = context.WithValue(r.ctx, key, val)

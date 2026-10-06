@@ -48,6 +48,8 @@ type Context interface {
 	Proxy() *Proxy
 	// Context 获取上下文
 	Context() context.Context
+	// SetContext 替换上下文；调用方应基于当前 Context() 派生，避免丢失已有 metadata/deadline。
+	SetContext(ctx context.Context)
 	// SetValue 为上下文设置值
 	SetValue(key, val any)
 	// GetValue 获取上下文中的值

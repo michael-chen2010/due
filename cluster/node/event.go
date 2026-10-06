@@ -162,6 +162,14 @@ func (e *event) Context() context.Context {
 	return e.ctx
 }
 
+// SetContext 替换上下文。
+func (e *event) SetContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	e.ctx = ctx
+}
+
 // SetValue 为上下文设置值
 func (e *event) SetValue(key, val any) {
 	e.ctx = context.WithValue(e.ctx, key, val)

@@ -146,9 +146,9 @@ func (c *Container) doWaitSystemSignal() {
 
 	switch runtime.GOOS {
 	case `windows`:
-		signal.Notify(sig, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	default:
-		signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGABRT, syscall.SIGKILL, syscall.SIGTERM)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGABRT, syscall.SIGTERM)
 	}
 
 	select {

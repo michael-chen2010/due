@@ -85,13 +85,12 @@ func (c *Client) Call(ctx context.Context, seq uint64, buf *buffer.NocopyBuffer,
 	}
 
 	msg := c.pool.Get().(*message)
-	msg.seq = seq
+	call := newCallState(seq)
 	msg.buf = buf
-	msg.call = make(chan buffer.Buffer)
-	msg.state.Store(statePending)
+	msg.call = call
 
 	if err := conn.send(msg); err != nil {
-		c.release(msg, true)
+		c.release(msg)
 		return nil, err
 	}
 
@@ -101,12 +100,12 @@ func (c *Client) Call(ctx context.Context, seq uint64, buf *buffer.NocopyBuffer,
 
 		select {
 		case <-ctx.Done():
-			conn.delete(msg)
+			call.cancel(conn.pending)
 			return nil, ctx.Err()
 		case <-tctx.Done():
-			conn.delete(msg)
+			call.cancel(conn.pending)
 			return nil, tctx.Err()
-		case res, ok := <-msg.call:
+		case res, ok := <-call.call:
 			if !ok {
 				return nil, errors.ErrConnectionHanged
 			}
@@ -116,9 +115,9 @@ func (c *Client) Call(ctx context.Context, seq uint64, buf *buffer.NocopyBuffer,
 	} else {
 		select {
 		case <-ctx.Done():
-			conn.delete(msg)
+			call.cancel(conn.pending)
 			return nil, ctx.Err()
-		case res, ok := <-msg.call:
+		case res, ok := <-call.call:
 			if !ok {
 				return nil, errors.ErrConnectionHanged
 			}
@@ -162,18 +161,12 @@ func (c *Client) load(idx ...int64) *conn {
 }
 
 // 释放
-func (c *Client) release(msg *message, isNeedClose ...bool) {
-	msg.seq = 0
-
+func (c *Client) release(msg *message) {
 	if msg.buf != nil {
 		msg.buf.Release()
 		msg.buf = nil
 	}
-
-	if msg.call != nil && len(isNeedClose) > 0 && isNeedClose[0] {
-		close(msg.call)
-		msg.call = nil
-	}
+	msg.call = nil
 
 	c.pool.Put(msg)
 }

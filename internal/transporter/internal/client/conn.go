@@ -127,18 +127,15 @@ func (c *conn) handshake(conn net.Conn) error {
 	var (
 		seq  = uint64(1)
 		buf  = protocol.EncodeHandshakeReq(seq, c.cli.opts.Kind, c.cli.opts.ID)
-		call = make(chan buffer.Buffer)
+		call = newCallState(seq)
 	)
-
+	call.state.Store(stateSent)
 	c.pending.store(seq, call)
 
 	if _, err := conn.Write(buf.Bytes()); err != nil {
 		buf.Release()
-
-		close(call)
-
 		c.pending.delete(seq)
-
+		call.state.Store(stateFailed)
 		return err
 	} else {
 		buf.Release()
@@ -149,12 +146,13 @@ func (c *conn) handshake(conn net.Conn) error {
 
 	select {
 	case <-ctx.Done():
-		c.pending.delete(seq)
-
+		call.cancel(c.pending)
 		return ctx.Err()
-	case buf := <-call:
+	case buf, ok := <-call.call:
+		if !ok {
+			return errors.ErrConnectionHanged
+		}
 		buf.Release()
-
 		return nil
 	}
 }
@@ -212,7 +210,7 @@ func (c *conn) read(conn net.Conn) {
 				buf.Release()
 			} else {
 				if call, ok := c.pending.extract(seq); ok {
-					call <- buf
+					call.deliver(buf)
 				} else {
 					buf.Release()
 				}
@@ -254,13 +252,13 @@ func (c *conn) write(conn net.Conn) {
 
 // 执行写入数据
 func (c *conn) doWrite(conn net.Conn, msg *message) bool {
-	if msg.seq != 0 {
-		if !msg.state.CompareAndSwap(statePending, stateSent) {
-			c.cli.release(msg, true)
-			return false
+	call := msg.call
+	if call != nil {
+		if !call.state.CompareAndSwap(statePending, stateSent) {
+			c.cli.release(msg)
+			return true
 		}
-
-		c.pending.store(msg.seq, msg.call)
+		c.pending.store(call.seq, call)
 	}
 
 	ok := msg.buf.Visit(func(node *buffer.NocopyNode) bool {
@@ -274,6 +272,10 @@ func (c *conn) doWrite(conn net.Conn, msg *message) bool {
 	c.cli.release(msg)
 
 	if !ok {
+		if call != nil {
+			c.pending.delete(call.seq)
+			call.fail()
+		}
 		c.retry(conn)
 	}
 
@@ -332,11 +334,4 @@ func (c *conn) wait() error {
 	}
 
 	return errors.ErrConnectionClosed
-}
-
-// 删除发送消息
-func (c *conn) delete(msg *message) {
-	if !msg.state.CompareAndSwap(statePending, stateCanceled) {
-		c.pending.delete(msg.seq)
-	}
 }

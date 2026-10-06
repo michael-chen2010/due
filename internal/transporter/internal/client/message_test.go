@@ -1,7 +1,6 @@
 package client_test
 
 import (
-	"sync/atomic"
 	"testing"
 	"unsafe"
 
@@ -9,10 +8,8 @@ import (
 )
 
 type message struct {
-	seq   uint64               // 序列号
-	buf   *buffer.NocopyBuffer // 数据buffer
-	call  chan buffer.Buffer   // 回调数据
-	state atomic.Int32         // 消息状态
+	buf  *buffer.NocopyBuffer // 数据buffer
+	call unsafe.Pointer       // 同步调用状态指针
 }
 
 func TestMessage(t *testing.T) {

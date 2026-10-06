@@ -78,9 +78,17 @@ func (p *proxy) trigger(ctx context.Context, event cluster.Event, cid, uid int64
 	}
 }
 
+func requestDeliveryToken(manager *session.Session, cid, uid int64) session.Token {
+	if uid == 0 {
+		return session.Token{}
+	}
+	token, _ := manager.Token(session.Conn, cid)
+	return token
+}
+
 // 投递消息
 func (p *proxy) deliver(ctx context.Context, cid, uid int64, metadata cluster.RequestMetadata, data []byte) error {
-	token, _ := p.gate.session.Token(session.Conn, cid)
+	token := requestDeliveryToken(p.gate.session, cid, uid)
 	message, err := packet.UnpackMessage(data)
 	if err != nil {
 		log.Errorf("unpack message failed: %v", err)

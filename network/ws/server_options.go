@@ -13,6 +13,7 @@ const (
 	defaultServerAddr               = ":3553"
 	defaultServerPath               = "/"
 	defaultServerMaxConnNum         = 5000
+	defaultServerListenBacklog      = 0
 	defaultServerCheckOrigin        = "*"
 	defaultServerWriteTimeout       = "0s"
 	defaultServerSocketWriteTimeout = "0s"
@@ -29,6 +30,7 @@ const (
 	defaultServerKeyFileKey            = "etc.network.ws.server.keyFile"
 	defaultServerCertFileKey           = "etc.network.ws.server.certFile"
 	defaultServerMaxConnNumKey         = "etc.network.ws.server.maxConnNum"
+	defaultServerListenBacklogKey      = "etc.network.ws.server.listenBacklog"
 	defaultServerWriteTimeoutKey       = "etc.network.ws.server.writeTimeout"
 	defaultServerSocketWriteTimeoutKey = "etc.network.ws.server.socketWriteTimeout"
 	defaultServerWriteQueueSizeKey     = "etc.network.ws.server.writeQueueSize"
@@ -51,6 +53,7 @@ type CheckOriginFunc func(r *http.Request) bool
 type serverOptions struct {
 	addr                            string             // 监听地址
 	maxConnNum                      int                // 最大连接数
+	listenBacklog                   int                // TCP listen backlog，0 表示保留 Go/OS 默认
 	certFile                        string             // 证书文件
 	keyFile                         string             // 秘钥文件
 	path                            string             // 路径，默认为"/"
@@ -86,6 +89,12 @@ func defaultServerOptions() *serverOptions {
 		opts.maxConnNum = maxConnNum
 	} else {
 		opts.maxConnNum = defaultServerMaxConnNum
+	}
+
+	if listenBacklog := etc.Get(defaultServerListenBacklogKey, defaultServerListenBacklog).Int(); listenBacklog >= 0 {
+		opts.listenBacklog = listenBacklog
+	} else {
+		opts.listenBacklog = defaultServerListenBacklog
 	}
 
 	if writeTimeout := etc.Get(defaultServerWriteTimeoutKey, defaultServerWriteTimeout).Duration(); writeTimeout >= 0 {
@@ -183,6 +192,18 @@ func WithServerMaxConnNum(maxConnNum int) ServerOption {
 			o.maxConnNum = maxConnNum
 		} else {
 			log.Warnf("the specified maxConnNum is less than zero and will be ignored")
+		}
+	}
+}
+
+// WithServerListenBacklog 设置 TCP listen backlog。
+// 0 保持兼容，表示使用 Go/OS 默认值。
+func WithServerListenBacklog(listenBacklog int) ServerOption {
+	return func(o *serverOptions) {
+		if listenBacklog >= 0 {
+			o.listenBacklog = listenBacklog
+		} else {
+			log.Warnf("the specified listenBacklog is less than zero and will be ignored")
 		}
 	}
 }

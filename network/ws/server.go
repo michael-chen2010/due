@@ -38,6 +38,8 @@ type server struct {
 
 var _ Server = &server{}
 
+var configureServerListenBacklog = applyServerListenBacklog
+
 func NewServer(opts ...ServerOption) Server {
 	o := defaultServerOptions()
 	for _, opt := range opts {
@@ -97,6 +99,12 @@ func (s *server) init() error {
 	ln, err := net.ListenTCP(addr.Network(), addr)
 	if err != nil {
 		return err
+	}
+	if s.opts.listenBacklog > 0 {
+		if err := configureServerListenBacklog(ln, s.opts.listenBacklog); err != nil {
+			_ = ln.Close()
+			return err
+		}
 	}
 
 	s.listener = ln

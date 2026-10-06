@@ -554,10 +554,15 @@ func (c *serverConn) doWrite(conn websocketMessageWriter, t *task) bool {
 func (c *serverConn) writeMessage(conn websocketMessageWriter, msg []byte) error {
 	if timeout := c.connMgr.server.opts.socketWriteTimeout; timeout > 0 {
 		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			c.observeSendFailure(socketWriteFailureReason(err))
 			return err
 		}
 	}
-	return conn.WriteMessage(websocket.BinaryMessage, msg)
+	if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+		c.observeSendFailure(socketWriteFailureReason(err))
+		return err
+	}
+	return nil
 }
 
 // 处理心跳
@@ -640,6 +645,7 @@ func (c *serverConn) doWriteToQueue(queue chan *task, typ int8, msg ...[]byte) e
 	lowPriority := queue == c.lowPriorityQueue
 	queuedBytes := int64(len(message))
 	if c.connMgr != nil && !c.connMgr.writeBudget.reserve(queuedBytes, lowPriority) {
+		c.observeSendFailure(SendFailureQueueBytesExceeded)
 		return ErrWriteQueueBytesExceeded
 	}
 
@@ -656,6 +662,7 @@ func (c *serverConn) doWriteToQueue(queue chan *task, typ int8, msg ...[]byte) e
 		select {
 		case <-ctx.Done():
 			c.doRecycleToPool(t)
+			c.observeSendFailure(SendFailureEnqueueTimeout)
 			return ctx.Err()
 		case queue <- t:
 			return nil

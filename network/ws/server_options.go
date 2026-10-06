@@ -65,6 +65,7 @@ type serverOptions struct {
 	heartbeatMechanism              HeartbeatMechanism // 心跳机制，默认resp
 	packetHeartbeatInspection       bool               // 是否按Due packet检查心跳，默认开启
 	authorizeTimeout                time.Duration      // 授权超时时间，默认0s，不检测
+	sendFailureObserver             ServerSendFailureObserver
 }
 
 func defaultServerOptions() *serverOptions {
@@ -254,6 +255,11 @@ func WithServerSlowConsumerEnqueueTimeoutLimit(limit int) ServerOption {
 			log.Warnf("the specified slowConsumerEnqueueTimeoutLimit is less than zero and will be ignored")
 		}
 	}
+}
+
+// WithServerSendFailureObserver observes send-path failures without changing queue or disconnect semantics.
+func WithServerSendFailureObserver(observer ServerSendFailureObserver) ServerOption {
+	return func(o *serverOptions) { o.sendFailureObserver = observer }
 }
 
 // WithServerHeartbeatInterval 设置心跳检测间隔时间

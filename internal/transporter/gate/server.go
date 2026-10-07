@@ -7,6 +7,7 @@ import (
 	"github.com/dobyte/due/v2/internal/transporter/internal/protocol"
 	"github.com/dobyte/due/v2/internal/transporter/internal/route"
 	"github.com/dobyte/due/v2/internal/transporter/internal/server"
+	"github.com/dobyte/due/v2/session"
 )
 
 type Server struct {
@@ -127,12 +128,23 @@ func (s *Server) isOnline(conn *server.Conn, data []byte) error {
 
 // 断开连接
 func (s *Server) disconnect(conn *server.Conn, data []byte) error {
-	seq, kind, target, force, err := protocol.DecodeDisconnectReq(data)
+	seq, kind, target, force, token, err :=
+		protocol.DecodeDisconnectReqWithToken(data)
 	if err != nil {
 		return err
 	}
 
-	err = s.provider.Disconnect(context.Background(), kind, target, force)
+	if token == (session.Token{}) {
+		err = s.provider.Disconnect(context.Background(), kind, target, force)
+	} else {
+		err = s.provider.DisconnectCurrent(
+			context.Background(),
+			kind,
+			target,
+			token,
+			force,
+		)
+	}
 
 	if seq == 0 {
 		return err

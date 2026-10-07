@@ -20,6 +20,8 @@ type Provider interface {
 	Stat(ctx context.Context, kind session.Kind) (total int64, err error)
 	// Disconnect 断开连接
 	Disconnect(ctx context.Context, kind session.Kind, target int64, force bool) error
+	// DisconnectCurrent 仅当目标 session token 仍为 current 时断开连接
+	DisconnectCurrent(ctx context.Context, kind session.Kind, target int64, token session.Token, force bool) error
 	// Push 发送消息
 	Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message []byte) error
 	// Multicast 推送组播消息

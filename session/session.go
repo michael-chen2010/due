@@ -296,6 +296,38 @@ func (s *Session) Close(kind Kind, target int64, force ...bool) error {
 	return conn.Close(force...)
 }
 
+// CloseCurrent closes only when kind/target still resolves to the
+// connection identified by token. A stale generation must never select a
+// replacement session that reconnected after the caller captured its target.
+func (s *Session) CloseCurrent(
+	kind Kind,
+	target int64,
+	token Token,
+	force ...bool,
+) error {
+	if token.UID <= 0 || token.Generation == 0 {
+		return errors.ErrStaleSession
+	}
+	if kind == User && target != token.UID {
+		return errors.ErrStaleSession
+	}
+
+	s.rw.RLock()
+	conn, err := s.conn(kind, target)
+	if err != nil {
+		s.rw.RUnlock()
+		return err
+	}
+	current, ok := s.users[token.UID]
+	if !ok || current != conn || s.tokens[conn.ID()] != token {
+		s.rw.RUnlock()
+		return errors.ErrStaleSession
+	}
+	s.rw.RUnlock()
+
+	return conn.Close(force...)
+}
+
 // Send 发送消息（同步）
 func (s *Session) Send(kind Kind, target int64, message []byte) error {
 	s.rw.RLock()

@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	disconnectReqBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b8 + b64 + b8
-	disconnectResBytes = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + defaultCodeBytes
+	disconnectReqBytes        = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + b8 + b64 + b8
+	disconnectCurrentReqBytes = disconnectReqBytes + b64 + b64
+	disconnectResBytes        = defaultSizeBytes + defaultHeaderBytes + defaultRouteBytes + defaultSeqBytes + defaultCodeBytes
 )
 
 // EncodeDisconnectReq 编码断连请求
@@ -26,6 +27,29 @@ func EncodeDisconnectReq(seq uint64, kind session.Kind, target int64, force bool
 	writer.WriteUint8s(uint8(kind))
 	writer.WriteInt64s(binary.BigEndian, target)
 	writer.WriteBools(force)
+
+	return buffer.NewNocopyBuffer(writer)
+}
+
+// EncodeDisconnectCurrentReq encodes a fenced disconnect request.
+// Wire format extends the legacy Disconnect request with token uid/generation.
+func EncodeDisconnectCurrentReq(
+	seq uint64,
+	kind session.Kind,
+	target int64,
+	force bool,
+	token session.Token,
+) *buffer.NocopyBuffer {
+	writer := buffer.MallocWriter(disconnectCurrentReqBytes)
+	writer.WriteUint32s(binary.BigEndian, uint32(disconnectCurrentReqBytes-defaultSizeBytes))
+	writer.WriteUint8s(dataBit)
+	writer.WriteUint8s(route.Disconnect)
+	writer.WriteUint64s(binary.BigEndian, seq)
+	writer.WriteUint8s(uint8(kind))
+	writer.WriteInt64s(binary.BigEndian, target)
+	writer.WriteBools(force)
+	writer.WriteInt64s(binary.BigEndian, token.UID)
+	writer.WriteUint64s(binary.BigEndian, token.Generation)
 
 	return buffer.NewNocopyBuffer(writer)
 }
@@ -63,6 +87,57 @@ func DecodeDisconnectReq(data []byte) (seq uint64, kind session.Kind, target int
 		return
 	}
 
+	return
+}
+
+// DecodeDisconnectReqWithToken decodes both legacy and fenced Disconnect
+// requests. Legacy requests return a zero token.
+func DecodeDisconnectReqWithToken(
+	data []byte,
+) (
+	seq uint64,
+	kind session.Kind,
+	target int64,
+	force bool,
+	token session.Token,
+	err error,
+) {
+	if len(data) == disconnectReqBytes {
+		seq, kind, target, force, err = DecodeDisconnectReq(data)
+		return
+	}
+	if len(data) != disconnectCurrentReqBytes {
+		err = errors.ErrInvalidMessage
+		return
+	}
+
+	reader := buffer.NewReader(data)
+	if _, err = reader.Seek(
+		defaultSizeBytes+defaultHeaderBytes+defaultRouteBytes,
+		io.SeekStart,
+	); err != nil {
+		return
+	}
+	if seq, err = reader.ReadUint64(binary.BigEndian); err != nil {
+		return
+	}
+	var k uint8
+	if k, err = reader.ReadUint8(); err != nil {
+		return
+	}
+	kind = session.Kind(k)
+	if target, err = reader.ReadInt64(binary.BigEndian); err != nil {
+		return
+	}
+	if force, err = reader.ReadBool(); err != nil {
+		return
+	}
+	if token.UID, err = reader.ReadInt64(binary.BigEndian); err != nil {
+		return
+	}
+	if token.Generation, err = reader.ReadUint64(binary.BigEndian); err != nil {
+		return
+	}
 	return
 }
 

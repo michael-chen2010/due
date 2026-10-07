@@ -1,10 +1,12 @@
 package session
 
 import (
+	"errors"
 	"net"
 	"sync"
 	"testing"
 
+	dueerrors "github.com/dobyte/due/v2/errors"
 	"github.com/dobyte/due/v2/network"
 )
 
@@ -103,6 +105,44 @@ func TestSessionTokenGenerationFencesReboundConnection(t *testing.T) {
 	}
 	if oldToken != firstToken {
 		t.Fatalf("old connection token=%+v, want original %+v", oldToken, firstToken)
+	}
+}
+
+func TestSessionCloseCurrentRejectsStaleGenerationAndClosesCurrentOnly(t *testing.T) {
+	s := NewSession()
+	const uid int64 = 1501
+	first := &testConn{id: 15}
+	second := &testConn{id: 16}
+	s.AddConn(first)
+	s.AddConn(second)
+
+	if err := s.Bind(first.ID(), uid); err != nil {
+		t.Fatalf("bind first: %v", err)
+	}
+	firstToken, err := s.Token(User, uid)
+	if err != nil {
+		t.Fatalf("first token: %v", err)
+	}
+	if err := s.Bind(second.ID(), uid); err != nil {
+		t.Fatalf("bind second: %v", err)
+	}
+	secondToken, err := s.Token(User, uid)
+	if err != nil {
+		t.Fatalf("second token: %v", err)
+	}
+
+	if err := s.CloseCurrent(User, uid, firstToken, true); !errors.Is(err, dueerrors.ErrStaleSession) {
+		t.Fatalf("stale CloseCurrent error=%v, want %v", err, dueerrors.ErrStaleSession)
+	}
+	if first.closed || second.closed {
+		t.Fatalf("stale CloseCurrent closed first/second=%v/%v", first.closed, second.closed)
+	}
+
+	if err := s.CloseCurrent(User, uid, secondToken, true); err != nil {
+		t.Fatalf("current CloseCurrent: %v", err)
+	}
+	if first.closed || !second.closed {
+		t.Fatalf("current CloseCurrent closed first/second=%v/%v want false/true", first.closed, second.closed)
 	}
 }
 

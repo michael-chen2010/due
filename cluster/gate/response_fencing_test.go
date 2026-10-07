@@ -29,6 +29,7 @@ type responseFenceConn struct {
 	attr   responseFenceAttr
 	sends  int
 	pushes int
+	closed bool
 }
 
 var _ network.Conn = (*responseFenceConn)(nil)
@@ -41,7 +42,7 @@ func (c *responseFenceConn) Unbind()                       { c.uid = 0 }
 func (c *responseFenceConn) Send([]byte) error             { c.sends++; return nil }
 func (c *responseFenceConn) Push([]byte) error             { c.pushes++; return nil }
 func (c *responseFenceConn) State() network.ConnState      { return network.ConnOpened }
-func (c *responseFenceConn) Close(...bool) error           { return nil }
+func (c *responseFenceConn) Close(...bool) error           { c.closed = true; return nil }
 func (c *responseFenceConn) LocalIP() (string, error)      { return "127.0.0.1", nil }
 func (c *responseFenceConn) LocalAddr() (net.Addr, error)  { return nil, nil }
 func (c *responseFenceConn) RemoteIP() (string, error)     { return "127.0.0.1", nil }
@@ -164,6 +165,53 @@ func TestProviderPushSupportsFencedUserDeliveryAndRejectsStaleGeneration(t *test
 			newConn.sends,
 			newConn.pushes,
 		)
+	}
+}
+
+func TestProviderDisconnectCurrentRejectsStaleGeneration(t *testing.T) {
+	const uid int64 = 9151
+	store := session.NewMemoryOwnershipStore()
+	manager := session.NewSession()
+	oldConn := &responseFenceConn{id: 351}
+	newConn := &responseFenceConn{id: 352}
+	manager.AddConn(oldConn)
+	manager.AddConn(newConn)
+	g := &Gate{opts: &options{ownershipStore: store}, session: manager}
+	p := &provider{gate: g}
+
+	oldToken, err := g.bindSession(context.Background(), oldConn.id, uid)
+	if err != nil {
+		t.Fatalf("bind old session: %v", err)
+	}
+	newToken, err := g.bindSession(context.Background(), newConn.id, uid)
+	if err != nil {
+		t.Fatalf("bind replacement session: %v", err)
+	}
+
+	if err := p.DisconnectCurrent(
+		context.Background(),
+		session.User,
+		uid,
+		oldToken,
+		true,
+	); !dueerrors.Is(err, dueerrors.ErrStaleSession) {
+		t.Fatalf("stale disconnect error=%v want=%v", err, dueerrors.ErrStaleSession)
+	}
+	if oldConn.closed || newConn.closed {
+		t.Fatalf("stale disconnect closed old/new=%v/%v", oldConn.closed, newConn.closed)
+	}
+
+	if err := p.DisconnectCurrent(
+		context.Background(),
+		session.User,
+		uid,
+		newToken,
+		true,
+	); err != nil {
+		t.Fatalf("current disconnect: %v", err)
+	}
+	if oldConn.closed || !newConn.closed {
+		t.Fatalf("current disconnect closed old/new=%v/%v want false/true", oldConn.closed, newConn.closed)
 	}
 }
 

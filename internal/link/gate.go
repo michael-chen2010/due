@@ -293,10 +293,14 @@ func (l *GateLinker) Disconnect(ctx context.Context, args *DisconnectArgs) error
 		return l.doDirectDisconnect(ctx, args)
 	case session.User:
 		if args.GID == "" {
-			return l.doIndirectDisconnect(ctx, args.Target, args.Force)
-		} else {
-			return l.doDirectDisconnect(ctx, args)
+			return l.doIndirectDisconnect(
+				ctx,
+				args.Target,
+				args.Token,
+				args.Force,
+			)
 		}
+		return l.doDirectDisconnect(ctx, args)
 	default:
 		return errors.ErrInvalidSessionKind
 	}
@@ -308,18 +312,54 @@ func (l *GateLinker) doDirectDisconnect(ctx context.Context, args *DisconnectArg
 	if err != nil {
 		return err
 	}
-
+	if args.Token != (session.Token{}) {
+		return client.DisconnectCurrent(
+			ctx,
+			args.Kind,
+			args.Target,
+			args.Token,
+			args.Force,
+		)
+	}
 	return client.Disconnect(ctx, args.Kind, args.Target, args.Force)
 }
 
 // 间接断开连接
-func (l *GateLinker) doIndirectDisconnect(ctx context.Context, uid int64, force bool) error {
-	_, err := l.doRPC(ctx, uid, func(client *gate.Client, index, total int) (bool, any, error) {
-		if err := client.Disconnect(ctx, session.User, uid, force); err != nil {
-			return errors.Is(err, errors.ErrNotFoundSession), nil, err
+func (l *GateLinker) doIndirectDisconnect(
+	ctx context.Context,
+	uid int64,
+	token session.Token,
+	force bool,
+) error {
+	_, err := l.doRPC(ctx, uid, func(
+		client *gate.Client,
+		index int,
+		total int,
+	) (bool, any, error) {
+		var disconnectErr error
+		if token == (session.Token{}) {
+			disconnectErr = client.Disconnect(
+				ctx,
+				session.User,
+				uid,
+				force,
+			)
 		} else {
-			return false, nil, nil
+			disconnectErr = client.DisconnectCurrent(
+				ctx,
+				session.User,
+				uid,
+				token,
+				force,
+			)
 		}
+		if disconnectErr != nil {
+			return errors.Is(
+				disconnectErr,
+				errors.ErrNotFoundSession,
+			), nil, disconnectErr
+		}
+		return false, nil, nil
 	})
 
 	return err

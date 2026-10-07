@@ -79,6 +79,42 @@ func (p *provider) Disconnect(ctx context.Context, kind session.Kind, target int
 	return p.gate.session.Close(kind, target, force)
 }
 
+// DisconnectCurrent only disconnects the session identified by token.
+func (p *provider) DisconnectCurrent(
+	ctx context.Context,
+	kind session.Kind,
+	target int64,
+	token session.Token,
+	force bool,
+) error {
+	if (kind != session.Conn && kind != session.User) ||
+		token.UID <= 0 ||
+		token.Generation == 0 {
+		return errors.ErrStaleSession
+	}
+	if kind == session.User && target != token.UID {
+		return errors.ErrStaleSession
+	}
+	if p.gate.opts.ownershipStore != nil {
+		current, ok, err := p.gate.opts.ownershipStore.Current(
+			ctx,
+			token.UID,
+		)
+		if err != nil {
+			return err
+		}
+		if !ok || current != token {
+			return errors.ErrStaleSession
+		}
+	}
+	return p.gate.session.CloseCurrent(
+		kind,
+		target,
+		token,
+		force,
+	)
+}
+
 // Push 发送消息
 func (p *provider) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message []byte) error {
 	if token != (session.Token{}) {

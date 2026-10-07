@@ -138,6 +138,30 @@ func (c *Client) Disconnect(ctx context.Context, kind session.Kind, target int64
 	return codes.CodeToError(code)
 }
 
+// DisconnectCurrent disconnects only the session identified by token.
+func (c *Client) DisconnectCurrent(
+	ctx context.Context,
+	kind session.Kind,
+	target int64,
+	token session.Token,
+	force bool,
+) error {
+	seq := c.doGenSequence()
+	buf := protocol.EncodeDisconnectCurrentReq(seq, kind, target, force, token)
+
+	res, err := c.cli.Call(ctx, seq, buf)
+	if err != nil {
+		return err
+	}
+	defer res.Release()
+
+	code, err := protocol.DecodeDisconnectRes(res.Bytes())
+	if err != nil {
+		return err
+	}
+	return codes.CodeToError(code)
+}
+
 // Push 推送消息
 func (c *Client) Push(ctx context.Context, kind session.Kind, target int64, disconnect bool, token session.Token, message buffer.Buffer, ack bool) error {
 	if ack {

@@ -27,6 +27,58 @@ func TestDecodeDisconnectReq(t *testing.T) {
 	t.Logf("force: %v", force)
 }
 
+func TestEncodeDecodeDisconnectCurrentReqCarriesSessionToken(t *testing.T) {
+	wantToken := session.Token{UID: 3003, Generation: 77}
+	buf := protocol.EncodeDisconnectCurrentReq(
+		9,
+		session.User,
+		wantToken.UID,
+		true,
+		wantToken,
+	)
+
+	seq, kind, target, force, token, err :=
+		protocol.DecodeDisconnectReqWithToken(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 9 ||
+		kind != session.User ||
+		target != wantToken.UID ||
+		!force ||
+		token != wantToken {
+		t.Fatalf(
+			"decoded seq/kind/target/force/token=%d/%v/%d/%v/%+v",
+			seq,
+			kind,
+			target,
+			force,
+			token,
+		)
+	}
+
+	legacy := protocol.EncodeDisconnectReq(10, session.User, 3004, false)
+	seq, kind, target, force, token, err =
+		protocol.DecodeDisconnectReqWithToken(legacy.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 10 ||
+		kind != session.User ||
+		target != 3004 ||
+		force ||
+		token != (session.Token{}) {
+		t.Fatalf(
+			"legacy decoded seq/kind/target/force/token=%d/%v/%d/%v/%+v",
+			seq,
+			kind,
+			target,
+			force,
+			token,
+		)
+	}
+}
+
 func TestEncodeDisconnectRes(t *testing.T) {
 	buffer := protocol.EncodeDisconnectRes(1, codes.OK)
 

@@ -176,10 +176,11 @@ type IsOnlineArgs struct {
 }
 
 type DisconnectArgs struct {
-	GID    string       // 网关ID，会话类型为用户时可忽略此参数
-	Kind   session.Kind // 会话类型，session.Conn 或 session.User
-	Target int64        // 会话目标，CID 或 UID
-	Force  bool         // 是否强制断开
+	GID    string        // 网关ID，会话类型为用户时可忽略此参数
+	Kind   session.Kind  // 会话类型，session.Conn 或 session.User
+	Target int64         // 会话目标，CID 或 UID
+	Token  session.Token // 可选目标 Session Token；非零时仅断开仍为 current 的会话
+	Force  bool          // 是否强制断开
 }
 
 type DeliverArgs struct {

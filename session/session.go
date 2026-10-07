@@ -71,12 +71,22 @@ func (s *Session) AddConn(conn network.Conn) {
 	}
 }
 
-// RemConn 移除连接
+// RemConn 移除连接。
 func (s *Session) RemConn(conn network.Conn) {
+	_, _ = s.RemConnWithToken(conn)
+}
+
+// RemConnWithToken atomically snapshots the connection's final UID/token and
+// removes the connection from the local session indexes under the same lock.
+// Gate disconnect uses this to serialize against concurrent Bind/BindToken so a
+// late bind cannot escape ownership cleanup after disconnect already observed
+// an older unbound UID.
+func (s *Session) RemConnWithToken(conn network.Conn) (int64, Token) {
 	s.rw.Lock()
 	defer s.rw.Unlock()
 
 	cid, uid := conn.ID(), conn.UID()
+	token := s.tokens[cid]
 
 	delete(s.conns, cid)
 	delete(s.tokens, cid)
@@ -92,6 +102,8 @@ func (s *Session) RemConn(conn network.Conn) {
 
 		return true
 	})
+
+	return uid, token
 }
 
 // Has 是否存在会话

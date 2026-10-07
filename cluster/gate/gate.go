@@ -156,10 +156,8 @@ func (g *Gate) handleConnect(conn network.Conn) {
 
 // 处理断开连接
 func (g *Gate) handleDisconnect(conn network.Conn) {
-	cid, uid := conn.ID(), conn.UID()
-	token, _ := g.session.Token(session.Conn, cid)
-
-	g.session.RemConn(conn)
+	cid := conn.ID()
+	uid, token := g.session.RemConnWithToken(conn)
 
 	if uid != 0 {
 		ctx, cancel := context.WithTimeout(g.ctx, 3*time.Second)

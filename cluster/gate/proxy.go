@@ -95,7 +95,19 @@ func (p *proxy) deliver(ctx context.Context, cid, uid int64, metadata cluster.Re
 		return err
 	}
 
+	var preferredNID string
+	if uid == 0 && p.gate.opts.statelessRouteAffinity != nil {
+		routingUID, group, ok := p.gate.opts.statelessRouteAffinity(message.Route, message.Buffer)
+		if ok {
+			preferredNID, err = p.nodeLinker.ResolveStatelessAffinityNode(ctx, message.Route, routingUID, group)
+			if err != nil {
+				return err // Do not pick a random Game when the owner lookup failed.
+			}
+		}
+	}
+
 	if err = p.nodeLinker.Deliver(ctx, &link.DeliverArgs{
+		NID:      preferredNID,
 		CID:      cid,
 		UID:      uid,
 		Token:    token,

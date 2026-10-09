@@ -111,6 +111,45 @@ func (l *NodeLinker) LocateNodes(ctx context.Context, uid int64) (map[string]str
 	return l.opts.Locator.LocateNodes(ctx, uid)
 }
 
+// ResolveStatelessAffinityNode finds a preferred destination only. It never
+// rewrites the authenticated UID or session token used for delivery.
+// An authoritative lookup (not the stateful UID cache) prevents sticky stale
+// routing hints across successive unauthenticated Login attempts.
+func (l *NodeLinker) ResolveStatelessAffinityNode(
+	ctx context.Context, routeID int32, uid int64, group string,
+) (string, error) {
+	if uid <= 0 || group == "" {
+		return "", nil
+	}
+	route, err := l.dispatcher.FindRoute(routeID)
+	if err != nil {
+		return "", err
+	}
+	if route.Stateful() || route.Authorized() || route.Group() != group {
+		return "", nil
+	}
+	if l.opts.Locator == nil {
+		return "", errors.ErrNotFoundLocator
+	}
+	nid, err := l.opts.Locator.LocateNode(ctx, uid, group)
+	if err != nil {
+		if errors.Is(err, errors.ErrNotFoundUserLocation) {
+			return "", nil
+		}
+		return "", err
+	}
+	if nid == "" {
+		return "", nil
+	}
+	if _, err := route.FindEndpoint(nid); err != nil {
+		if errors.Is(err, errors.ErrNotFoundEndpoint) {
+			return "", nil // Stale locator entry: fall back to stateless dispatch.
+		}
+		return "", err
+	}
+	return nid, nil
+}
+
 // BindNode 绑定节点
 // 单个用户可以绑定到多个节点服务器上，相同名称的节点服务器只能绑定一个，多次绑定会到相同名称的节点服务器会覆盖之前的绑定。
 // 绑定操作会通过发布订阅方式同步到网关服务器和其他相关节点服务器上。

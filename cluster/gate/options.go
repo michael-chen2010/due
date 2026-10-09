@@ -56,6 +56,10 @@ type Option func(o *options)
 
 type TraceContextGenerator func(cluster.RequestMetadata) (traceParent, traceState string, complete func(error))
 
+// StatelessRouteAffinity extracts an untrusted affinity hint from a request.
+// It does not authenticate a physical connection or rewrite the session UID.
+type StatelessRouteAffinity func(route int32, payload []byte) (uid int64, group string, ok bool)
+
 type options struct {
 	ctx                    context.Context        // 上下文
 	id                     string                 // 实例ID
@@ -64,6 +68,7 @@ type options struct {
 	locator                locate.Locator         // 用户定位器
 	registry               registry.Registry      // 服务注册器
 	ownershipStore         session.OwnershipStore // 分布式会话所有权存储器
+	statelessRouteAffinity StatelessRouteAffinity // 未认证请求路由亲和性提示
 	dispatch               cluster.Dispatch       // 无状态路由消息分发策略
 	metadata               map[string]string      // 元数据
 	addr                   string                 // 内部RPC监听地址
@@ -235,6 +240,13 @@ func WithOwnershipStore(store session.OwnershipStore) Option {
 			log.Warnf("the specified ownership store is nil and will be ignored")
 		}
 	}
+}
+
+// WithStatelessRouteAffinity optionally directs a pre-authentication request
+// to the node already holding its PlayerActor. Other routes retain the usual
+// dispatch strategy; UID and session fencing are never derived from the hint.
+func WithStatelessRouteAffinity(resolver StatelessRouteAffinity) Option {
+	return func(o *options) { o.statelessRouteAffinity = resolver }
 }
 
 // WithDispatch 设置无状态路由消息分发策略

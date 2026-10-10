@@ -444,6 +444,21 @@ func (l *NodeLinker) PackBuffer(message any, encrypt bool) ([]byte, error) {
 	return data, nil
 }
 
+// LocalBoundUserIDs snapshots users whose cached source is this exact node.
+// Long-lived locator bindings must be released by the owning Game only after
+// its durable final flush, including users whose idle Actor was evicted.
+func (l *NodeLinker) LocalBoundUserIDs(name, nid string) []int64 {
+	l.rw.RLock()
+	defer l.rw.RUnlock()
+	var users []int64
+	for uid, sources := range l.sources {
+		if sources[name] == nid {
+			users = append(users, uid)
+		}
+	}
+	return users
+}
+
 // 存储用户节点来源
 func (l *NodeLinker) doStoreSource(uid int64, name, nid string) {
 	wait, done := func() (bool, bool) {

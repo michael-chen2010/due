@@ -216,6 +216,12 @@ func (p *Proxy) FetchNodeList(ctx context.Context, states ...cluster.State) ([]*
 	return p.nodeLinker.FetchNodeList(ctx, states...)
 }
 
+// LocalBoundNodeUserIDs returns the local node's cached user source bindings.
+// It is a read-only snapshot, used by Game's post-final-flush drain cleanup.
+func (p *Proxy) LocalBoundNodeUserIDs() []int64 {
+	return p.nodeLinker.LocalBoundUserIDs(p.node.opts.name, p.node.opts.id)
+}
+
 // BindActor 绑定Actor
 func (p *Proxy) BindActor(uid int64, kind, id string) error {
 	return p.node.scheduler.bindActor(uid, kind, id)

@@ -51,8 +51,8 @@ func newProxy(node *Node) *Proxy {
 			WriteTimeout:      node.opts.writeTimeout,
 			WriteQueueSize:    node.opts.writeQueueSize,
 			FaultRecoveryTime: node.opts.faultRecoveryTime,
-			WaitHandler:       node.addWait,
-			DoneHandler:       node.doneWait,
+			WaitHandler:       node.addOwnedSource,
+			DoneHandler:       node.doneOwnedSource,
 		}),
 	}
 }

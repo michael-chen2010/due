@@ -28,26 +28,27 @@ type serviceEntity struct {
 
 type Node struct {
 	component.Base
-	opts        *options
-	ctx         context.Context
-	cancel      context.CancelFunc
-	state       atomic.Int32
-	evtPool     *sync.Pool
-	reqPool     *sync.Pool
-	router      *Router
-	trigger     *Trigger
-	proxy       *Proxy
-	services    []*serviceEntity
-	instances   []*registry.ServiceInstance
-	linker      *node.Server
-	fnChan      chan func()
-	scheduler   *Scheduler
-	transporter transport.Server
-	wg          *sync.WaitGroup
-	closeStage  atomic.Int32 // diagnostic only: 0=running, 1=registry, 2=close-hooks, 3=wait, 4=complete
-	pendingWork atomic.Int64 // diagnostic only: mirrors addWait/doneWait registrations
-	rw          sync.RWMutex
-	hooks       map[cluster.Hook][]HookHandler
+	opts         *options
+	ctx          context.Context
+	cancel       context.CancelFunc
+	state        atomic.Int32
+	evtPool      *sync.Pool
+	reqPool      *sync.Pool
+	router       *Router
+	trigger      *Trigger
+	proxy        *Proxy
+	services     []*serviceEntity
+	instances    []*registry.ServiceInstance
+	linker       *node.Server
+	fnChan       chan func()
+	scheduler    *Scheduler
+	transporter  transport.Server
+	wg           *sync.WaitGroup
+	closeStage   atomic.Int32 // diagnostic only: 0=running, 1=registry, 2=close-hooks, 3=wait, 4=complete
+	pendingWork  atomic.Int64 // accepted async work only: mirrors addWait/doneWait
+	ownedSources atomic.Int64 // long-lived local routes: released after Game final flush
+	rw           sync.RWMutex
+	hooks        map[cluster.Hook][]HookHandler
 }
 
 func NewNode(opts ...Option) *Node {
@@ -178,7 +179,11 @@ func (n *Node) ShutdownCloseStatus() string {
 	default:
 		stage = "not-started"
 	}
-	return fmt.Sprintf("stage=%s pending_waits=%d", stage, n.pendingWork.Load())
+	status := fmt.Sprintf("stage=%s pending_waits=%d", stage, n.pendingWork.Load())
+	if sources := n.ownedSources.Load(); sources != 0 {
+		status += fmt.Sprintf(" owned_sources=%d", sources)
+	}
+	return status
 }
 
 // Destroy 销毁节点服务器
@@ -560,6 +565,18 @@ func (n *Node) printInfo() {
 	}
 
 	info.PrintBoxInfo("Node", infos...)
+}
+
+// Source bindings survive until the Game Destroy hook has durably flushed state
+// and released ownership. They are not accepted asynchronous work and must not
+// deadlock the earlier Node.Close WaitGroup barrier.
+func (n *Node) addOwnedSource() {
+	n.ownedSources.Add(1)
+}
+
+func (n *Node) doneOwnedSource() {
+	// Source release runs from the Game Destroy hook, after state becomes Shut.
+	n.ownedSources.Add(-1)
 }
 
 func (n *Node) doneWait() {

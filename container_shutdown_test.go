@@ -56,6 +56,10 @@ func (c *blockingCloseComponent) Close() {
 	<-c.release
 }
 
+func (c *blockingCloseComponent) ShutdownCloseStatus() string {
+	return "stage=waitgroup pending_waits=1"
+}
+
 func TestContainerCloseReportsConfiguredShutdownDeadline(t *testing.T) {
 	const key = "etc.shutdownMaxWaitTime"
 	original := etc.Get(key).String()
@@ -76,7 +80,8 @@ func TestContainerCloseReportsConfiguredShutdownDeadline(t *testing.T) {
 		t.Fatalf("close error=%v, want context.DeadlineExceeded", err)
 	}
 	if !strings.Contains(err.Error(), "pending close components=") ||
-		!strings.Contains(err.Error(), "blockingCloseComponent") {
+		!strings.Contains(err.Error(), "blockingCloseComponent") ||
+		!strings.Contains(err.Error(), "stage=waitgroup pending_waits=1") {
 		t.Fatalf("close timeout error must name blocking component, got %v", err)
 	}
 }

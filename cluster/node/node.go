@@ -44,6 +44,8 @@ type Node struct {
 	scheduler   *Scheduler
 	transporter transport.Server
 	wg          *sync.WaitGroup
+	closeStage  atomic.Int32 // diagnostic only: 0=running, 1=registry, 2=close-hooks, 3=wait, 4=complete
+	pendingWork atomic.Int64 // diagnostic only: mirrors addWait/doneWait registrations
 	rw          sync.RWMutex
 	hooks       map[cluster.Hook][]HookHandler
 }
@@ -145,11 +147,38 @@ func (n *Node) Close() {
 		}
 	}
 
+	n.closeStage.Store(1)
 	n.refreshServiceInstances()
 
+	n.closeStage.Store(2)
 	n.runHookFunc(cluster.Close)
 
+	n.closeStage.Store(3)
 	n.wg.Wait()
+	n.closeStage.Store(4)
+}
+
+// ShutdownCloseStatus is a bounded, thread-safe best-effort snapshot for the
+// container's timeout error. The counter is diagnostic, never a correctness
+// condition or a replacement for the actual WaitGroup.
+func (n *Node) ShutdownCloseStatus() string {
+	if n == nil {
+		return "node=nil"
+	}
+	var stage string
+	switch n.closeStage.Load() {
+	case 1:
+		stage = "registry-refresh"
+	case 2:
+		stage = "close-hooks"
+	case 3:
+		stage = "waitgroup"
+	case 4:
+		stage = "complete"
+	default:
+		stage = "not-started"
+	}
+	return fmt.Sprintf("stage=%s pending_waits=%d", stage, n.pendingWork.Load())
 }
 
 // Destroy 销毁节点服务器
@@ -536,11 +565,13 @@ func (n *Node) printInfo() {
 func (n *Node) doneWait() {
 	if n.getState() != cluster.Shut {
 		n.wg.Done()
+		n.pendingWork.Add(-1)
 	}
 }
 
 func (n *Node) addWait() {
 	if n.getState() != cluster.Shut {
 		n.wg.Add(1)
+		n.pendingWork.Add(1)
 	}
 }

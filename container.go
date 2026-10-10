@@ -137,7 +137,11 @@ func (c *Container) doCloseComponents() error {
 	var pending []string
 	for i, comp := range c.components {
 		if !closed[i].Load() {
-			pending = append(pending, fmt.Sprintf("%s(%T)", comp.Name(), comp))
+			label := fmt.Sprintf("%s(%T)", comp.Name(), comp)
+			if diagnostic, ok := comp.(interface{ ShutdownCloseStatus() string }); ok {
+				label += " " + diagnostic.ShutdownCloseStatus()
+			}
+			pending = append(pending, label)
 		}
 	}
 	if len(pending) == 0 {

@@ -84,19 +84,31 @@ func (r *registrar) register(ctx context.Context, ins *registry.ServiceInstance)
 		return err
 	}
 
-	r.chHeartbeat <- heartbeat{
+	return r.dispatchHeartbeat(ctx, heartbeat{
 		leaseID: leaseID,
 		key:     key,
 		value:   value,
-	}
+	})
+}
 
-	return nil
+// dispatchHeartbeat must not outlive the caller or the registrar: the
+// unbuffered channel can have no receiver once the heartbeat loop exits.
+func (r *registrar) dispatchHeartbeat(ctx context.Context, update heartbeat) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.ctx.Done():
+		return r.ctx.Err()
+	case r.chHeartbeat <- update:
+		return nil
+	}
 }
 
 // 解注册服务
 func (r *registrar) deregister(ctx context.Context, ins *registry.ServiceInstance) error {
 	r.cancel()
-	close(r.chHeartbeat)
+	// The worker already exits on r.ctx.Done(). Closing chHeartbeat here
+	// would race with an in-flight Register and panic on send to closed channel.
 
 	key := fmt.Sprintf("/%s/%s/%s", r.registry.opts.namespace, ins.Name, ins.ID)
 

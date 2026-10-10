@@ -3,6 +3,7 @@ package due
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,5 +74,17 @@ func TestContainerCloseReportsConfiguredShutdownDeadline(t *testing.T) {
 	close(comp.release)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("close error=%v, want context.DeadlineExceeded", err)
+	}
+	if !strings.Contains(err.Error(), "pending close components=") ||
+		!strings.Contains(err.Error(), "blockingCloseComponent") {
+		t.Fatalf("close timeout error must name blocking component, got %v", err)
+	}
+}
+
+func TestContainerCloseSuccessReturnsNoPendingDiagnostics(t *testing.T) {
+	container := NewContainer()
+	container.Add(&component.Base{})
+	if err := container.doCloseComponents(); err != nil {
+		t.Fatalf("completed component close returned unexpected error: %v", err)
 	}
 }

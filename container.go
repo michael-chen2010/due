@@ -2,11 +2,14 @@ package due
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -110,15 +113,38 @@ func (c *Container) doStartComponents() {
 // 关闭所有组件
 func (c *Container) doCloseComponents() error {
 	g := xcall.NewGoroutines()
+	closed := make([]atomic.Bool, len(c.components))
 
-	for _, comp := range c.components {
-		g.Add(comp.Close)
+	for i, comp := range c.components {
+		index, current := i, comp
+		g.Add(func() {
+			current.Close()
+			closed[index].Store(true)
+		})
 	}
 
-	return g.Run(
+	err := g.Run(
 		context.Background(),
 		etc.Get(defaultShutdownMaxWaitTimeKey).Duration(),
 	)
+	if err == nil {
+		return nil
+	}
+
+	// Keep the existing deadline and Close/Destroy semantics unchanged. When
+	// Close times out, name the component still holding the shutdown barrier,
+	// so an operational log can distinguish Node from Gate/Mesh/other Close.
+	var pending []string
+	for i, comp := range c.components {
+		if !closed[i].Load() {
+			pending = append(pending, fmt.Sprintf("%s(%T)", comp.Name(), comp))
+		}
+	}
+	if len(pending) == 0 {
+		return err
+	}
+	sort.Strings(pending)
+	return fmt.Errorf("%w: pending close components=%v", err, pending)
 }
 
 // 销毁所有组件

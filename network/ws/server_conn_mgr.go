@@ -19,8 +19,9 @@ import (
 )
 
 type serverConnMgr struct {
-	id          atomic.Int64      // 连接ID
-	total       atomic.Int64      // 总连接数
+	id          atomic.Int64 // 连接ID
+	total       atomic.Int64 // 总连接数
+	closing     atomic.Bool
 	server      *server           // 服务器
 	writeBudget *writeQueueBudget // Gate 级共享写队列字节预算
 	pool        sync.Pool         // 连接池
@@ -46,6 +47,7 @@ func newConnMgr(server *server) *serverConnMgr {
 
 // 关闭连接
 func (cm *serverConnMgr) close() {
+	cm.closing.Store(true)
 	var wg sync.WaitGroup
 
 	wg.Add(len(cm.partitions))
@@ -86,8 +88,12 @@ func (cm *serverConnMgr) allocate(c *websocket.Conn) error {
 		return nil
 	}
 	index := int(reflect.ValueOf(c).Pointer()) % len(cm.partitions)
-	cm.partitions[index].store(c, conn)
+	stored := cm.partitions[index].storeOpen(c, conn, &cm.closing)
 	conn.rw.Unlock()
+	if !stored {
+		cm.total.Add(-1)
+		_ = conn.forceClose(false)
+	}
 
 	return nil
 }
@@ -95,6 +101,9 @@ func (cm *serverConnMgr) allocate(c *websocket.Conn) error {
 func (cm *serverConnMgr) reserve() bool {
 	maxConnNum := int64(cm.server.opts.maxConnNum)
 	for {
+		if cm.closing.Load() {
+			return false
+		}
 		total := cm.total.Load()
 		if total >= maxConnNum {
 			return false
@@ -125,9 +134,17 @@ type partition struct {
 
 // 存储连接
 func (p *partition) store(c *websocket.Conn, conn *serverConn) {
+	p.storeOpen(c, conn, nil)
+}
+
+func (p *partition) storeOpen(c *websocket.Conn, conn *serverConn, closing *atomic.Bool) bool {
 	p.rw.Lock()
+	defer p.rw.Unlock()
+	if closing != nil && closing.Load() {
+		return false
+	}
 	p.connections[c] = conn
-	p.rw.Unlock()
+	return true
 }
 
 // 删除连接
@@ -144,7 +161,18 @@ func (p *partition) delete(c *websocket.Conn) (*serverConn, bool) {
 
 // 关闭该分片内的所有连接
 func (p *partition) close() {
-	for _, conn := range p.connections {
+	for _, conn := range p.snapshot() {
 		_ = conn.Close()
 	}
+}
+
+// Do not hold the partition lock while Close can recycle into the same map.
+func (p *partition) snapshot() []*serverConn {
+	p.rw.RLock()
+	defer p.rw.RUnlock()
+	connections := make([]*serverConn, 0, len(p.connections))
+	for _, conn := range p.connections {
+		connections = append(connections, conn)
+	}
+	return connections
 }

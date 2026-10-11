@@ -89,7 +89,15 @@ func (a *Actor) Idle() {
 		a.idleTimer.Stop()
 	}
 	a.idleGeneration++
-	generation := a.idleGeneration
+	a.scheduleIdleReleaseLocked(a.idleGeneration)
+	a.lifecycleMu.Unlock()
+}
+
+// scheduleIdleReleaseLocked is called with lifecycleMu held. Guard denial,
+// including transient Redis/Session lookup errors, must NOT permanently strand
+// an idle Actor until another unrelated Idle() call. Retry with the SAME
+// generation so Active/Touch or a newer Idle reliably cancels stale retries.
+func (a *Actor) scheduleIdleReleaseLocked(generation uint64) {
 	a.idleTimer = time.AfterFunc(a.opts.idleTimeout, func() {
 		a.lifecycleMu.Lock()
 		if a.state.Load() != started || a.idleGeneration != generation {
@@ -100,6 +108,11 @@ func (a *Actor) Idle() {
 		a.lifecycleMu.Unlock()
 
 		if a.opts.releaseGuard != nil && !a.opts.releaseGuard(a) {
+			a.lifecycleMu.Lock()
+			if a.state.Load() == started && a.idleGeneration == generation {
+				a.scheduleIdleReleaseLocked(generation)
+			}
+			a.lifecycleMu.Unlock()
 			return
 		}
 
@@ -113,7 +126,6 @@ func (a *Actor) Idle() {
 
 		a.Destroy()
 	})
-	a.lifecycleMu.Unlock()
 }
 
 func (a *Actor) cancelIdleRelease() {

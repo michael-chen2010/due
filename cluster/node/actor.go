@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -164,6 +165,27 @@ func (a *Actor) TryInvoke(fn func()) bool {
 
 	a.fnChan <- fn
 	return true
+}
+
+// TryInvokeContext queues only while its request is live. A full fnChan
+// must not hold a stale request (and Actor lifecycle RW lock) beyond its
+// cancellation/deadline. A callback already accepted may still execute;
+// callers must check authorization and admission inside that callback.
+func (a *Actor) TryInvokeContext(ctx context.Context, fn func()) bool {
+	if a == nil || ctx == nil || ctx.Err() != nil {
+		return false
+	}
+	a.rw.RLock()
+	defer a.rw.RUnlock()
+	if a.state.Load() != started || ctx.Err() != nil {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case a.fnChan <- fn:
+		return true
+	}
 }
 
 // AfterFunc 延迟调用，与官方的time.AfterFunc用法一致

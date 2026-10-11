@@ -46,6 +46,7 @@ type Router struct {
 	preRouteHandler     RouteHandler
 	postRouteHandler    RouteHandler
 	defaultRouteHandler RouteHandler
+	requestMiddlewares  []MiddlewareHandler
 }
 
 type routeEntity struct {
@@ -106,6 +107,24 @@ func (r *Router) SetPreRouteHandler(handler RouteHandler) {
 	}
 
 	r.preRouteHandler = handler
+}
+
+// SetRequestMiddleware installs guards before every registered/default request
+// handler, including routes registered later. Configure only before Node.Start.
+// A guard may use Context.Task and continue through Middleware.Next without
+// blocking the router. Route-local middlewares follow these global guards.
+func (r *Router) SetRequestMiddleware(handlers ...MiddlewareHandler) {
+	if r.node.getState() != cluster.Shut {
+		log.Warnf("the node server is working, can't set request middleware")
+		return
+	}
+	for _, handler := range handlers {
+		if handler == nil {
+			log.Warnf("request middleware must not be nil")
+			return
+		}
+	}
+	r.requestMiddlewares = append([]MiddlewareHandler(nil), handlers...)
 }
 
 // SetPostRouteHandler 设置后置路由处理器
@@ -204,17 +223,21 @@ func (r *Router) handle(req *request) {
 		xcall.Call(func() { r.preRouteHandler(req) })
 	}
 
+	handler := r.defaultRouteHandler
+	var local []MiddlewareHandler
 	if ok {
-		if len(route.options.Middlewares) > 0 {
-			middleware := &Middleware{index: -1, middlewares: route.options.Middlewares, routeHandler: route.handler}
-			middleware.Next(req)
-			return
-		} else {
-			xcall.Call(func() { route.handler(req) })
-		}
-	} else {
-		xcall.Call(func() { r.defaultRouteHandler(req) })
+		handler = route.handler
+		local = route.options.Middlewares
 	}
+	if len(r.requestMiddlewares)+len(local) > 0 {
+		combined := make([]MiddlewareHandler, 0, len(r.requestMiddlewares)+len(local))
+		combined = append(combined, r.requestMiddlewares...)
+		combined = append(combined, local...)
+		middleware := &Middleware{index: -1, middlewares: combined, routeHandler: handler}
+		middleware.Next(req)
+		return
+	}
+	xcall.Call(func() { handler(req) })
 
 	req.compareVersionExecDefer(version)
 

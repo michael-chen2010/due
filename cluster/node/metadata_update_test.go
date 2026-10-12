@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	linknode "github.com/dobyte/due/v2/internal/transporter/node"
 	"github.com/dobyte/due/v2/registry"
 )
 
@@ -130,4 +131,40 @@ func cloneStringMap(input map[string]string) map[string]string {
 		output[key] = value
 	}
 	return output
+}
+
+// Status reporters can publish before Node.Start finishes registering instances.
+func TestRegisterServiceInstancesConcurrentStartupMetadata(t *testing.T) {
+	reg := &metadataUpdateRegistry{}
+	n := NewNode(WithRegistry(reg), WithMetadata(map[string]string{"build": "m6"}))
+	defer n.cancel()
+	var err error
+	n.linker, err = linknode.NewServer(&provider{node: n}, &linknode.ServerOptions{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-start
+		for i := 0; i < 200; i++ {
+			if err := n.updateMetadata(map[string]string{"status": "pending"}); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	close(start)
+	for i := 0; i < 20; i++ {
+		n.registerServiceInstances()
+	}
+	<-done
+	if err := n.updateMetadata(map[string]string{"status": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	got := reg.lastRegister()
+	if got == nil || got.Metadata["build"] != "m6" || got.Metadata["status"] != "ready" {
+		t.Fatalf("startup metadata lost: %#v", got)
+	}
 }

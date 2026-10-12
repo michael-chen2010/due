@@ -329,6 +329,9 @@ func (n *Node) registerServiceInstances() {
 		events = append(events, int(evt))
 	}
 
+	// Startup status reporters may already call UpdateMetadata. Publish the
+	// instances under the same lock used by updates and registry snapshots.
+	n.rw.Lock()
 	n.instances = append(n.instances, &registry.ServiceInstance{
 		ID:       n.opts.id,
 		Name:     cluster.Node.String(),
@@ -339,7 +342,7 @@ func (n *Node) registerServiceInstances() {
 		Events:   events,
 		Endpoint: n.linker.Endpoint().String(),
 		Weight:   n.opts.weight,
-		Metadata: n.opts.metadata,
+		Metadata: cloneMetadata(n.opts.metadata),
 	})
 
 	if n.transporter != nil {
@@ -357,10 +360,11 @@ func (n *Node) registerServiceInstances() {
 			Services: services,
 			Endpoint: n.transporter.Endpoint().String(),
 			Weight:   n.opts.weight,
-			Metadata: n.opts.metadata,
+			Metadata: cloneMetadata(n.opts.metadata),
 		})
 	}
 
+	n.rw.Unlock()
 	if err := n.doRegisterServiceInstances(); err != nil {
 		log.Fatalf("register cluster instances failed: %v", err)
 	}

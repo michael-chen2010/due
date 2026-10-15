@@ -40,8 +40,9 @@ func TestRedisOwnershipWholeHashLossCannotReuseFencingGeneration(t *testing.T) {
 			t.Error("owned key not zero", n, e)
 		}
 	})
-	first := sessionredis.NewStore(sessionredis.WithClient(client), sessionredis.WithPrefix(prefix))
-	second := sessionredis.NewStore(sessionredis.WithClient(client), sessionredis.WithPrefix(prefix))
+	allocator := newRangeModel()
+	first := sessionredis.NewStore(sessionredis.WithClient(client), sessionredis.WithPrefix(prefix), sessionredis.WithGenerationRangeAllocator(allocator))
+	second := sessionredis.NewStore(sessionredis.WithClient(client), sessionredis.WithPrefix(prefix), sessionredis.WithGenerationRangeAllocator(allocator))
 	old, e := first.Acquire(ctx, uid)
 	if e != nil {
 		t.Fatal(e)

@@ -24,18 +24,26 @@ func integrationAddress(t *testing.T) string {
 	return "127.0.0.1:6379"
 }
 
+var testStorePrefix sync.Map
+
+func prefixOf(s *sessionredis.Store) string { v, _ := testStorePrefix.Load(s); return v.(string) }
+
 func newStores(t *testing.T) (*sessionredis.Store, *sessionredis.Store, func()) {
 	t.Helper()
 	addr := integrationAddress(t)
 	prefix := fmt.Sprintf("due:test:session:ownership:%d", time.Now().UnixNano())
+	allocator := newRangeModel()
 	first := sessionredis.NewStore(
 		sessionredis.WithAddrs(addr),
 		sessionredis.WithPrefix(prefix),
+		sessionredis.WithGenerationRangeAllocator(allocator),
 	)
 	second := sessionredis.NewStore(
 		sessionredis.WithAddrs(addr),
 		sessionredis.WithPrefix(prefix),
+		sessionredis.WithGenerationRangeAllocator(allocator),
 	)
+	testStorePrefix.Store(first, prefix)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := first.Ping(ctx); err != nil {
@@ -50,9 +58,22 @@ func newStores(t *testing.T) (*sessionredis.Store, *sessionredis.Store, func()) 
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		iter := client.Scan(ctx, 0, prefix+":*", 0).Iterator()
+		var keys []string
 		for iter.Next(ctx) {
-			_ = client.Del(ctx, iter.Val()).Err()
+			keys = append(keys, iter.Val())
 		}
+		if e := iter.Err(); e != nil {
+			t.Error(e)
+		}
+		if len(keys) > 0 {
+			if e := client.Del(ctx, keys...).Err(); e != nil {
+				t.Error(e)
+			}
+			if n, e := client.Exists(ctx, keys...).Result(); e != nil || n != 0 {
+				t.Error("owned keys remain", n, e)
+			}
+		}
+		testStorePrefix.Delete(first)
 		_ = client.Close()
 		_ = first.Close()
 		_ = second.Close()

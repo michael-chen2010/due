@@ -12,13 +12,14 @@ const (
 type Option func(*options)
 
 type options struct {
-	addrs      []string
-	db         int
-	username   string
-	password   string
-	maxRetries int
-	client     goredis.UniversalClient
-	prefix     string
+	addrs          []string
+	db             int
+	username       string
+	password       string
+	maxRetries     int
+	client         goredis.UniversalClient
+	prefix         string
+	rangeAllocator GenerationRangeAllocator
 }
 
 func defaultOptions() *options {
@@ -64,4 +65,10 @@ func WithPrefix(prefix string) Option {
 			o.prefix = prefix
 		}
 	}
+}
+
+// WithGenerationRangeAllocator enables durable reservations when a hash is
+// missing, legacy, or exhausted. It must serialize initialization by UID.
+func WithGenerationRangeAllocator(allocator GenerationRangeAllocator) Option {
+	return func(o *options) { o.rangeAllocator = allocator }
 }

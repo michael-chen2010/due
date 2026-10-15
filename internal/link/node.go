@@ -212,6 +212,17 @@ func (l *NodeLinker) FetchNodeList(ctx context.Context, states ...cluster.State)
 
 // Deliver 投递消息给节点处理
 func (l *NodeLinker) Deliver(ctx context.Context, args *DeliverArgs) error {
+	return l.deliver(ctx, args, false)
+}
+
+// DeliverRequest is the Gate request path: no player location means the frame
+// was not queued and must reach its rejection handler, not appear delivered.
+// General Node/Mesh Deliver retains its historical missing-target behavior.
+func (l *NodeLinker) DeliverRequest(ctx context.Context, args *DeliverArgs) error {
+	return l.deliver(ctx, args, true)
+}
+
+func (l *NodeLinker) deliver(ctx context.Context, args *DeliverArgs, strict bool) error {
 	var (
 		err          error
 		buf          buffer.Buffer
@@ -273,7 +284,7 @@ func (l *NodeLinker) Deliver(ctx context.Context, args *DeliverArgs) error {
 				buf.Release()
 			}
 
-			if !errors.Is(err, errors.ErrNotFoundUserLocation) {
+			if strict || !errors.Is(err, errors.ErrNotFoundUserLocation) {
 				return err
 			}
 		}

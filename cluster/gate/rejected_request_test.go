@@ -8,6 +8,7 @@ import (
 
 	"github.com/dobyte/due/v2/cluster"
 	dueerrors "github.com/dobyte/due/v2/errors"
+	"github.com/dobyte/due/v2/locate"
 	"github.com/dobyte/due/v2/network"
 	"github.com/dobyte/due/v2/packet"
 	"github.com/dobyte/due/v2/registry"
@@ -42,6 +43,55 @@ func TestRejectedRequestPreservesFrameConnectionAndMetadata(t *testing.T) {
 				t.Fatalf("calls=%d traced=%v", calls, traced)
 			}
 		})
+	}
+}
+
+type rejectedMissingLocator struct{ locate.Locator }
+
+func (*rejectedMissingLocator) LocateNode(context.Context, int64, string) (string, error) {
+	return "", nil
+}
+
+func TestRejectedRequestAuthenticatedMissingLocation(t *testing.T) {
+	w := &rejectedWatcher{updates: make(chan []*registry.ServiceInstance, 1), stopped: make(chan struct{})}
+	calls := 0
+	g := NewGate(WithRegistry(&rejectedRegistry{watcher: w}), WithLocator(&rejectedMissingLocator{}), WithRejectedRequestHandler(func(_ network.Conn, _ cluster.RequestMetadata, _ []byte, cause error) error {
+		calls++
+		if !errors.Is(cause, dueerrors.ErrNotFoundUserLocation) {
+			t.Errorf("cause=%v", cause)
+		}
+		return nil
+	}))
+	w.ctx = g.ctx
+	g.proxy.nodeLinker.WatchClusterInstance()
+	defer func() {
+		g.cancel()
+		select {
+		case <-w.stopped:
+		case <-time.After(time.Second):
+			t.Error("watcher not stopped")
+		}
+	}()
+	w.updates <- []*registry.ServiceInstance{{ID: "live-game", Name: "game", Kind: cluster.Node.String(), State: cluster.Work.String(), Endpoint: "tcp://127.0.0.1:1", Routes: []registry.Route{{ID: 9301, Stateful: true, Authorized: true}}}}
+	deadline := time.Now().Add(time.Second)
+	for !g.proxy.nodeLinker.HasNode("live-game") && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !g.proxy.nodeLinker.HasNode("live-game") {
+		t.Fatal("controlled live route not installed")
+	}
+	conn := &ownershipTestConn{id: 74}
+	g.session.AddConn(conn)
+	if e := g.session.Bind(74, 42); e != nil {
+		t.Fatal(e)
+	}
+	frame, e := packet.PackMessage(&packet.Message{Seq: 1, Route: 9301})
+	if e != nil {
+		t.Fatal(e)
+	}
+	g.handleReceive(conn, frame)
+	if calls != 1 {
+		t.Fatalf("missing player location was silently accepted: rejected callbacks=%d want1", calls)
 	}
 }
 

@@ -106,7 +106,7 @@ func (p *proxy) deliver(ctx context.Context, cid, uid int64, metadata cluster.Re
 		}
 	}
 
-	if err = p.nodeLinker.Deliver(ctx, &link.DeliverArgs{
+	if err = p.nodeLinker.DeliverRequest(ctx, &link.DeliverArgs{
 		NID:      preferredNID,
 		CID:      cid,
 		UID:      uid,

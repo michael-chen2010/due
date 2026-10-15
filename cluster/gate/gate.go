@@ -211,6 +211,11 @@ func (g *Gate) handleReceive(conn network.Conn, data []byte) {
 	metadata, completeTrace := g.newRequestMetadataWithTraceLifecycle()
 
 	err := g.proxy.deliver(g.ctx, cid, uid, metadata, data)
+	if err != nil && g.opts.rejectedRequestHandler != nil {
+		if replyErr := g.opts.rejectedRequestHandler(conn, metadata, data, err); replyErr != nil {
+			log.Errorf("respond rejected request failed, cid: %d err: %v", cid, replyErr)
+		}
+	}
 	completeTraceContextLifecycle(completeTrace, err)
 }
 

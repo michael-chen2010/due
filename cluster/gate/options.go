@@ -60,6 +60,12 @@ type TraceContextGenerator func(cluster.RequestMetadata) (traceParent, traceStat
 // It does not authenticate a physical connection or rewrite the session UID.
 type StatelessRouteAffinity func(route int32, payload []byte) (uid int64, group string, ok bool)
 
+// RejectedRequestHandler responds in the application's protocol to a request
+// synchronously rejected before the node transport accepted it. A successful
+// enqueue (including any later execution/response failure) never invokes it.
+// The frame is the original adapted Due packet; the connection owns its seqs.
+type RejectedRequestHandler func(network.Conn, cluster.RequestMetadata, []byte, error) error
+
 type options struct {
 	ctx                    context.Context        // 上下文
 	id                     string                 // 实例ID
@@ -69,20 +75,26 @@ type options struct {
 	registry               registry.Registry      // 服务注册器
 	ownershipStore         session.OwnershipStore // 分布式会话所有权存储器
 	statelessRouteAffinity StatelessRouteAffinity // 未认证请求路由亲和性提示
-	dispatch               cluster.Dispatch       // 无状态路由消息分发策略
-	metadata               map[string]string      // 元数据
-	addr                   string                 // 内部RPC监听地址
-	expose                 bool                   // 内部RPC是否暴露到公网
-	connNum                int                    // 内部RPC拨号连接数
-	callTimeout            time.Duration          // 内部RPC调用超时时间
-	requestTimeout         time.Duration          // 业务请求端到端截止时间；零值表示不生成 deadline
-	correlationIDGenerator func() string          // 请求关联ID生成器；nil 表示不生成
-	traceContextGenerator  TraceContextGenerator  // W3C traceparent/tracestate 生成器；nil 表示不生成
-	dialTimeout            time.Duration          // 内部RPC拨号超时时间
-	dialRetryTimes         int                    // 内部RPC拨号重试次数
-	writeTimeout           time.Duration          // 内部RPC写入超时时间
-	writeQueueSize         int32                  // 内部RPC写入队列大小
-	faultRecoveryTime      time.Duration          // 内部RPC故障恢复时间
+	rejectedRequestHandler RejectedRequestHandler
+	dispatch               cluster.Dispatch      // 无状态路由消息分发策略
+	metadata               map[string]string     // 元数据
+	addr                   string                // 内部RPC监听地址
+	expose                 bool                  // 内部RPC是否暴露到公网
+	connNum                int                   // 内部RPC拨号连接数
+	callTimeout            time.Duration         // 内部RPC调用超时时间
+	requestTimeout         time.Duration         // 业务请求端到端截止时间；零值表示不生成 deadline
+	correlationIDGenerator func() string         // 请求关联ID生成器；nil 表示不生成
+	traceContextGenerator  TraceContextGenerator // W3C traceparent/tracestate 生成器；nil 表示不生成
+	dialTimeout            time.Duration         // 内部RPC拨号超时时间
+	dialRetryTimes         int                   // 内部RPC拨号重试次数
+	writeTimeout           time.Duration         // 内部RPC写入超时时间
+	writeQueueSize         int32                 // 内部RPC写入队列大小
+	faultRecoveryTime      time.Duration         // 内部RPC故障恢复时间
+}
+
+// WithRejectedRequestHandler is opt-in; Due does not prescribe a wire error.
+func WithRejectedRequestHandler(handler RejectedRequestHandler) Option {
+	return func(o *options) { o.rejectedRequestHandler = handler }
 }
 
 func defaultOptions() *options {

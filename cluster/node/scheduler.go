@@ -26,12 +26,18 @@ func newScheduler(node *Node) *Scheduler {
 
 // 衍生出一个Actor
 func (s *Scheduler) spawn(creator Creator, opts ...ActorOption) (*Actor, error) {
+	a, _, err := s.spawnObserved(creator, opts...)
+	return a, err
+}
+
+func (s *Scheduler) spawnObserved(creator Creator, opts ...ActorOption) (*Actor, *ActorTermination, error) {
 	o := defaultActorOptions()
 	for _, opt := range opts {
 		opt(o)
 	}
 
 	act := &Actor{}
+	act.termination = new(ActorTermination)
 	act.opts = o
 	act.scheduler = s
 	act.state.Store(started)
@@ -43,9 +49,9 @@ func (s *Scheduler) spawn(creator Creator, opts ...ActorOption) (*Actor, error) 
 
 	s.mu.Lock()
 
-	if _, ok := s.load(act.Kind(), act.ID()); ok {
+	if current, ok := s.load(act.Kind(), act.ID()); ok {
 		s.mu.Unlock()
-		return nil, errors.ErrActorExists
+		return nil, current.Termination(), errors.ErrActorExists
 	}
 
 	if act.opts.wait {
@@ -72,7 +78,7 @@ func (s *Scheduler) spawn(creator Creator, opts ...ActorOption) (*Actor, error) 
 
 	act.processor.Start()
 
-	return act, nil
+	return act, nil, nil
 }
 
 // 杀死Actor

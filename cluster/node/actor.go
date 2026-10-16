@@ -34,6 +34,22 @@ type Actor struct {
 	lifecycleMu         sync.Mutex                     // 生命周期定时器锁
 	idleTimer           *time.Timer                    // Idle 自动释放定时器
 	idleGeneration      uint64                         // 防止旧定时器释放新一代 Actor 状态
+	termination         *ActorTermination
+}
+
+// ActorTermination is a payload-free observation of one Actor's completed
+// terminal lifecycle. It does not grant route or persistence ownership.
+type ActorTermination struct{ complete atomic.Bool }
+
+func (t *ActorTermination) Complete() bool { return t != nil && t.complete.Load() }
+
+// Termination returns the immutable witness allocated before Spawn publishes
+// this Actor. Nil/zero Actors have no witness and cannot prove completion.
+func (a *Actor) Termination() *ActorTermination {
+	if a == nil {
+		return nil
+	}
+	return a.termination
 }
 
 // ID 获取Actor的ID
@@ -382,7 +398,7 @@ func (a *Actor) finishDestroy() {
 	if a.opts.releaseHook != nil {
 		a.opts.releaseHook(a)
 	}
-
+	a.termination.complete.Store(true)
 }
 
 // 绑定用户

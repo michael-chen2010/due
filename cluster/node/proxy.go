@@ -350,6 +350,13 @@ func (p *Proxy) Spawn(creator Creator, opts ...ActorOption) (*Actor, error) {
 	return p.node.scheduler.spawn(creator, opts...)
 }
 
+// SpawnObserved preserves Spawn's behavior and error identity, additionally
+// returning the exact conflicting instance's terminal witness when its PID
+// already exists. Scheduler absence alone cannot prove Destroy completed.
+func (p *Proxy) SpawnObserved(creator Creator, opts ...ActorOption) (*Actor, *ActorTermination, error) {
+	return p.node.scheduler.spawnObserved(creator, opts...)
+}
+
 // Kill 杀死存在的一个Actor
 func (p *Proxy) Kill(kind, id string) bool {
 	return p.node.scheduler.kill(kind, id)

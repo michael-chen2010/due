@@ -29,6 +29,8 @@ type GateLinker struct {
 	dispatcher *dispatcher.Dispatcher // 分发器
 }
 
+func (l *GateLinker) DiscoveredPeerCount() int { return l.dispatcher.EndpointCount() }
+
 func NewGateLinker(ctx context.Context, opts *Options) *GateLinker {
 	if opts.SourceHintCapacity < 0 {
 		panic("source hint capacity must not be negative")

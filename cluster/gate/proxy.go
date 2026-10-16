@@ -17,6 +17,8 @@ type proxy struct {
 	nodeLinker *link.NodeLinker // 节点链接器
 }
 
+func (g *Gate) DiscoveredNodeCount() int { return g.proxy.nodeLinker.DiscoveredPeerCount() }
+
 func newProxy(gate *Gate) *proxy {
 	return &proxy{gate: gate, nodeLinker: link.NewNodeLinker(gate.ctx, &link.Options{
 		SourceHintCapacity: gate.opts.sourceHintCapacity,

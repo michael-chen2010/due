@@ -19,6 +19,11 @@ type Proxy struct {
 	nodeLinker *link.NodeLinker // 节点链接器
 }
 
+// DiscoveredPeerCounts are independent dispatcher snapshots, without IDs.
+func (p *Proxy) DiscoveredPeerCounts() (nodes, gates int) {
+	return p.nodeLinker.DiscoveredPeerCount(), p.gateLinker.DiscoveredPeerCount()
+}
+
 func newProxy(node *Node) *Proxy {
 	return &Proxy{
 		node: node,

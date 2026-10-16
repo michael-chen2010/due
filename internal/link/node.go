@@ -28,6 +28,8 @@ type NodeLinker struct {
 	hints      *sourceHints
 }
 
+func (l *NodeLinker) DiscoveredPeerCount() int { return l.dispatcher.EndpointCount() }
+
 func NewNodeLinker(ctx context.Context, opts *Options) *NodeLinker {
 	if opts.SourceHintCapacity < 0 {
 		panic("source hint capacity must not be negative")

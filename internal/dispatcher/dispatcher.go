@@ -19,6 +19,9 @@ type Dispatcher struct {
 	instances map[string]*registry.ServiceInstance
 }
 
+// EndpointCount reports only the number of currently discovered peers.
+func (d *Dispatcher) EndpointCount() int { d.rw.RLock(); defer d.rw.RUnlock(); return len(d.endpoints) }
+
 func NewDispatcher(dispatch cluster.Dispatch) *Dispatcher {
 	return &Dispatcher{dispatch: dispatch}
 }

@@ -110,8 +110,13 @@ type watcherMgr struct {
 }
 
 func newWatcherMgr(r *Registry, ctx context.Context, serviceName string) (*watcherMgr, error) {
-	services, err := r.services(ctx, serviceName)
+	return newWatcherMgrWithWatcher(r, ctx, serviceName, clientv3.NewWatcher(r.opts.client))
+}
+
+func newWatcherMgrWithWatcher(r *Registry, ctx context.Context, serviceName string, upstream clientv3.Watcher) (*watcherMgr, error) {
+	services, revision, err := r.servicesWithRevision(ctx, serviceName)
 	if err != nil {
+		_ = upstream.Close()
 		return nil, err
 	}
 
@@ -119,8 +124,8 @@ func newWatcherMgr(r *Registry, ctx context.Context, serviceName string) (*watch
 	w.ctx, w.cancel = context.WithCancel(r.ctx)
 	w.registry = r
 	w.serviceName = serviceName
-	w.watcher = clientv3.NewWatcher(r.opts.client)
-	w.chWatch = w.watcher.Watch(w.ctx, buildPrefixKey(r.opts.namespace, w.serviceName), clientv3.WithPrefix())
+	w.watcher = upstream
+	w.chWatch = w.watcher.Watch(w.ctx, buildPrefixKey(r.opts.namespace, w.serviceName), clientv3.WithPrefix(), clientv3.WithRev(revision+1))
 	w.watchers = make(map[int64]*watcher)
 
 	for _, service := range services {

@@ -148,21 +148,30 @@ func (r *Registry) Close() error {
 
 // 获取服务实例列表
 func (r *Registry) services(ctx context.Context, serviceName string) ([]*registry.ServiceInstance, error) {
+	services, _, err := r.servicesWithRevision(ctx, serviceName)
+	return services, err
+}
+
+// The watch must start at the revision immediately after this exact snapshot.
+func (r *Registry) servicesWithRevision(ctx context.Context, serviceName string) ([]*registry.ServiceInstance, int64, error) {
 	res, err := r.opts.client.Get(ctx, buildPrefixKey(r.opts.namespace, serviceName), clientv3.WithPrefix())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	if res == nil || res.Header == nil || res.Header.Revision <= 0 || res.Header.Revision == int64(1<<63-1) {
+		return nil, 0, fmt.Errorf("invalid registry snapshot revision")
 	}
 
 	services := make([]*registry.ServiceInstance, 0, len(res.Kvs))
 	for _, kv := range res.Kvs {
 		service, err := unmarshal(kv.Value)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		services = append(services, service)
 	}
 
-	return services, nil
+	return services, res.Header.Revision, nil
 }
 
 func marshal(ins *registry.ServiceInstance) (string, error) {

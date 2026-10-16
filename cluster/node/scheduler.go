@@ -104,6 +104,36 @@ func (s *Scheduler) killActor(actor *Actor) bool {
 	return ok
 }
 
+// killIdleActor commits the expected instance and idle generation together.
+// Active wins before this decision, or observes destroyed afterwards; there
+// is no unlocked check-to-Destroy window. No application callback runs locked.
+func (s *Scheduler) killIdleActor(actor *Actor, generation uint64) bool {
+	if actor == nil {
+		return false
+	}
+	s.mu.Lock()
+	actor.lifecycleMu.Lock()
+	current, ok := s.load(actor.Kind(), actor.ID())
+	if !ok || current != actor || actor.idleGeneration != generation || !actor.state.CompareAndSwap(started, destroyed) {
+		actor.lifecycleMu.Unlock()
+		s.mu.Unlock()
+		return false
+	}
+	actor.idleGeneration++
+	if actor.idleTimer != nil {
+		actor.idleTimer.Stop()
+		actor.idleTimer = nil
+	}
+	s.removeActorLocked(actor)
+	actor.lifecycleMu.Unlock()
+	s.mu.Unlock()
+	actor.finishDestroy()
+	if actor.opts.wait {
+		s.node.doneWait()
+	}
+	return true
+}
+
 // 移除Actor
 func (s *Scheduler) remove(kind, id string) (*Actor, bool) {
 	s.mu.Lock()

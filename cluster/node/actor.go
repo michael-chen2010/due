@@ -100,33 +100,31 @@ func (a *Actor) Idle() {
 // generation so Active/Touch or a newer Idle reliably cancels stale retries.
 func (a *Actor) scheduleIdleReleaseLocked(generation uint64) {
 	a.idleTimer = time.AfterFunc(a.opts.idleTimeout, func() {
-		a.lifecycleMu.Lock()
-		if a.state.Load() != started || a.idleGeneration != generation {
-			a.lifecycleMu.Unlock()
-			return
-		}
-		a.idleTimer = nil
-		a.lifecycleMu.Unlock()
-
-		if a.opts.releaseGuard != nil && !a.opts.releaseGuard(a) {
-			a.lifecycleMu.Lock()
-			if a.state.Load() == started && a.idleGeneration == generation {
-				a.scheduleIdleReleaseLocked(generation)
-			}
-			a.lifecycleMu.Unlock()
-			return
-		}
-
-		a.lifecycleMu.Lock()
-		if a.state.Load() != started || a.idleGeneration != generation {
-			a.lifecycleMu.Unlock()
-			return
-		}
-		a.idleGeneration++
-		a.lifecycleMu.Unlock()
-
-		a.Destroy()
+		a.releaseIdleGeneration(generation)
 	})
+}
+
+func (a *Actor) releaseIdleGeneration(generation uint64) {
+	a.lifecycleMu.Lock()
+	if a.state.Load() != started || a.idleGeneration != generation {
+		a.lifecycleMu.Unlock()
+		return
+	}
+	a.idleTimer = nil
+	a.lifecycleMu.Unlock()
+
+	if a.opts.releaseGuard != nil && !a.opts.releaseGuard(a) {
+		a.lifecycleMu.Lock()
+		if a.state.Load() == started && a.idleGeneration == generation {
+			a.scheduleIdleReleaseLocked(generation)
+		}
+		a.lifecycleMu.Unlock()
+		return
+	}
+
+	if !a.scheduler.killIdleActor(a, generation) && a.opts.releaseGuard != nil && a.opts.releaseGuardCanceled != nil {
+		a.opts.releaseGuardCanceled(a)
+	}
 }
 
 func (a *Actor) cancelIdleRelease() {
@@ -347,11 +345,20 @@ func (a *Actor) destroy() bool {
 	}
 
 	a.cancelIdleRelease()
+	a.finishDestroy()
+	return true
+}
+
+// finishDestroy runs only after the single started->destroyed commit, with
+// scheduler and lifecycle locks released before invoking application code.
+func (a *Actor) finishDestroy() {
 	a.processor.Destroy()
 
 	a.scheduler.batchUnbindActor(func(relations map[int64]map[string]*Actor) {
 		a.binds.Range(func(uid, _ any) bool {
-			delete(relations[uid.(int64)], a.Kind())
+			if relations[uid.(int64)][a.Kind()] == a {
+				delete(relations[uid.(int64)], a.Kind())
+			}
 			return true
 		})
 	})
@@ -376,7 +383,6 @@ func (a *Actor) destroy() bool {
 		a.opts.releaseHook(a)
 	}
 
-	return true
 }
 
 // 绑定用户

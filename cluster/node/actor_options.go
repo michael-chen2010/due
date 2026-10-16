@@ -7,14 +7,15 @@ type ActorReleaseGuard func(actor *Actor) bool
 type ActorReleaseHook func(actor *Actor)
 
 type actorOptions struct {
-	id           string            // Actor编号
-	kind         string            // Actor类型
-	args         []any             // 传递到Processor中的参数
-	wait         bool              // 是否需要等待
-	dispatch     bool              // 是否接受调度器调度
-	idleTimeout  time.Duration     // 空闲释放超时；<=0 表示禁用自动释放
-	releaseGuard ActorReleaseGuard // 自动释放前的最终校验
-	releaseHook  ActorReleaseHook  // Actor 实际销毁后的回调
+	id                   string            // Actor编号
+	kind                 string            // Actor类型
+	args                 []any             // 传递到Processor中的参数
+	wait                 bool              // 是否需要等待
+	dispatch             bool              // 是否接受调度器调度
+	idleTimeout          time.Duration     // 空闲释放超时；<=0 表示禁用自动释放
+	releaseGuard         ActorReleaseGuard // 自动释放前的最终校验
+	releaseHook          ActorReleaseHook  // Actor 实际销毁后的回调
+	releaseGuardCanceled ActorReleaseHook  // 成功的自动释放校验未提交销毁时撤销预约
 }
 
 type ActorOption func(o *actorOptions)
@@ -73,4 +74,11 @@ func WithActorReleaseHook(hook ActorReleaseHook) ActorOption {
 			o.releaseHook = hook
 		}
 	}
+}
+
+// WithActorReleaseGuardCanceled releases a reservation made by a successful
+// idle guard when Active, a newer Idle, or explicit destruction wins instead.
+// It is never called for a denied guard and runs outside lifecycle locks.
+func WithActorReleaseGuardCanceled(hook ActorReleaseHook) ActorOption {
+	return func(o *actorOptions) { o.releaseGuardCanceled = hook }
 }

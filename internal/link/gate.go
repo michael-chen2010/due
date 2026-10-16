@@ -21,14 +21,18 @@ import (
 )
 
 type GateLinker struct {
-	ctx        context.Context        // 上下文
-	opts       *Options               // 参数项
-	sources    sync.Map               // 用户源
+	ctx        context.Context // 上下文
+	opts       *Options        // 参数项
+	sources    sync.Map        // 用户源
+	hints      *sourceHints
 	builder    *gate.Builder          // 构建器
 	dispatcher *dispatcher.Dispatcher // 分发器
 }
 
 func NewGateLinker(ctx context.Context, opts *Options) *GateLinker {
+	if opts.SourceHintCapacity < 0 {
+		panic("source hint capacity must not be negative")
+	}
 	l := &GateLinker{
 		ctx:        ctx,
 		opts:       opts,
@@ -46,6 +50,9 @@ func NewGateLinker(ctx context.Context, opts *Options) *GateLinker {
 		}),
 	}
 
+	if opts.SourceHintCapacity > 0 {
+		l.hints = newSourceHints(opts.SourceHintCapacity)
+	}
 	return l
 }
 
@@ -70,6 +77,21 @@ func (l *GateLinker) LocateGate(ctx context.Context, uid int64) (string, error) 
 	if l.opts.Locator == nil {
 		return "", errors.ErrNotFoundLocator
 	}
+	if l.hints != nil {
+		cached, ok, revision := l.hints.load(uid, "gate")
+		if ok {
+			return cached, nil
+		}
+		gid, err := l.opts.Locator.LocateGate(ctx, uid)
+		if err != nil {
+			return "", err
+		}
+		if gid == "" {
+			return "", errors.ErrNotFoundUserLocation
+		}
+		l.hints.fill(uid, "gate", gid, revision)
+		return gid, nil
+	}
 
 	if val, ok := l.sources.Load(uid); ok {
 		if gid := val.(string); gid != "" {
@@ -86,7 +108,7 @@ func (l *GateLinker) LocateGate(ctx context.Context, uid int64) (string, error) 
 		return "", errors.ErrNotFoundUserLocation
 	}
 
-	l.sources.Store(uid, gid)
+	l.storeGateHint(uid, gid)
 
 	return gid, nil
 }
@@ -102,7 +124,7 @@ func (l *GateLinker) BindGate(ctx context.Context, gid string, cid, uid int64) e
 		return err
 	}
 
-	l.sources.Store(uid, gid)
+	l.storeGateHint(uid, gid)
 
 	return nil
 }
@@ -119,7 +141,7 @@ func (l *GateLinker) UnbindGate(ctx context.Context, uid int64) error {
 		return err
 	}
 
-	l.sources.Delete(uid)
+	l.deleteGateHint(uid)
 
 	return nil
 }
@@ -810,7 +832,7 @@ func (l *GateLinker) doRPC(ctx context.Context, uid int64, successHandler func(c
 			break
 		}
 
-		l.sources.Delete(uid)
+		l.deleteGateHint(uid)
 	}
 
 	return reply, err
@@ -896,18 +918,46 @@ func (l *GateLinker) WatchUserLocate() {
 				}
 
 				for _, event := range events {
-					switch event.Type {
-					case locate.BindGate:
-						l.sources.Store(event.UID, event.InsID)
-					case locate.UnbindGate:
-						l.sources.Delete(event.UID)
-					default:
-						// ignore
-					}
+					l.applySourceEvent(event)
 				}
 			}
 		}
 	}()
+}
+
+func (l *GateLinker) SourceHintCount() int {
+	if l.hints == nil {
+		return 0
+	}
+	return l.hints.count()
+}
+func (l *GateLinker) storeGateHint(uid int64, gid string) {
+	if l.hints != nil {
+		l.hints.store(uid, "gate", gid)
+		return
+	}
+	l.sources.Store(uid, gid)
+}
+func (l *GateLinker) deleteGateHint(uid int64) {
+	if l.hints != nil {
+		l.hints.invalidate(uid, "gate")
+		return
+	}
+	l.sources.Delete(uid)
+}
+func (l *GateLinker) applySourceEvent(event *locate.Event) {
+	if event.Type != locate.BindGate && event.Type != locate.UnbindGate {
+		return
+	}
+	if l.hints != nil {
+		l.hints.invalidate(event.UID, "gate")
+		return
+	}
+	if event.Type == locate.BindGate {
+		l.storeGateHint(event.UID, event.InsID)
+	} else {
+		l.deleteGateHint(event.UID)
+	}
 }
 
 // WatchClusterInstance 监听集群实例

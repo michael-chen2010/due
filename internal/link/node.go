@@ -25,10 +25,14 @@ type NodeLinker struct {
 	dispatcher *dispatcher.Dispatcher      // 分发器
 	rw         sync.RWMutex                // 锁
 	sources    map[int64]map[string]string // 用户来源节点
+	hints      *sourceHints
 }
 
 func NewNodeLinker(ctx context.Context, opts *Options) *NodeLinker {
-	return &NodeLinker{
+	if opts.SourceHintCapacity < 0 {
+		panic("source hint capacity must not be negative")
+	}
+	l := &NodeLinker{
 		ctx:        ctx,
 		opts:       opts,
 		sources:    make(map[int64]map[string]string),
@@ -45,6 +49,10 @@ func NewNodeLinker(ctx context.Context, opts *Options) *NodeLinker {
 			FaultRecoveryTime: opts.FaultRecoveryTime,
 		}),
 	}
+	if opts.SourceHintCapacity > 0 {
+		l.hints = newSourceHints(opts.SourceHintCapacity)
+	}
+	return l
 }
 
 // HasNode 检测是否存在某个节点
@@ -55,6 +63,10 @@ func (l *NodeLinker) HasNode(nid string) bool {
 
 // AskNode 检测用户是否在给定的节点上
 func (l *NodeLinker) AskNode(ctx context.Context, uid int64, name, nid string) (string, bool, error) {
+	if l.hints != nil {
+		found, err := l.LocateNode(ctx, uid, name)
+		return found, found == nid && err == nil, err
+	}
 	if l.opts.Locator == nil {
 		return "", false, errors.ErrNotFoundLocator
 	}
@@ -81,6 +93,21 @@ func (l *NodeLinker) AskNode(ctx context.Context, uid int64, name, nid string) (
 func (l *NodeLinker) LocateNode(ctx context.Context, uid int64, name string) (string, error) {
 	if l.opts.Locator == nil {
 		return "", errors.ErrNotFoundLocator
+	}
+	if l.hints != nil {
+		cached, ok, revision := l.hints.load(uid, name)
+		if ok {
+			return cached, nil
+		}
+		nid, err := l.opts.Locator.LocateNode(ctx, uid, name)
+		if err != nil {
+			return "", err
+		}
+		if nid == "" {
+			return "", errors.ErrNotFoundUserLocation
+		}
+		l.hints.fill(uid, name, nid, revision)
+		return nid, nil
 	}
 
 	nid, ok := l.doLoadSource(uid, name)
@@ -162,6 +189,9 @@ func (l *NodeLinker) BindNode(ctx context.Context, uid int64, name, nid string) 
 		return err
 	}
 
+	if l.hints != nil && nid == l.opts.ID {
+		l.storeLegacySource(uid, name, nid)
+	}
 	l.doStoreSource(uid, name, nid)
 
 	return nil
@@ -179,6 +209,9 @@ func (l *NodeLinker) UnbindNode(ctx context.Context, uid int64, name, nid string
 		return err
 	}
 
+	if l.hints != nil {
+		l.deleteLegacySource(uid, name, nid)
+	}
 	l.doDeleteSource(uid, name, nid)
 
 	return nil
@@ -472,6 +505,14 @@ func (l *NodeLinker) LocalBoundUserIDs(name, nid string) []int64 {
 
 // 存储用户节点来源
 func (l *NodeLinker) doStoreSource(uid int64, name, nid string) {
+	if l.hints != nil {
+		l.hints.store(uid, name, nid)
+		return
+	}
+	l.storeLegacySource(uid, name, nid)
+}
+
+func (l *NodeLinker) storeLegacySource(uid int64, name, nid string) {
 	wait, done := func() (bool, bool) {
 		l.rw.Lock()
 		defer l.rw.Unlock()
@@ -515,6 +556,14 @@ func (l *NodeLinker) doStoreSource(uid int64, name, nid string) {
 
 // 删除用户节点来源
 func (l *NodeLinker) doDeleteSource(uid int64, name, nid string) {
+	if l.hints != nil {
+		l.hints.invalidate(uid, name)
+		return
+	}
+	l.deleteLegacySource(uid, name, nid)
+}
+
+func (l *NodeLinker) deleteLegacySource(uid int64, name, nid string) {
 	done := func() bool {
 		l.rw.Lock()
 		defer l.rw.Unlock()
@@ -550,6 +599,10 @@ func (l *NodeLinker) doDeleteSource(uid int64, name, nid string) {
 
 // 加载用户节点来源
 func (l *NodeLinker) doLoadSource(uid int64, name string) (string, bool) {
+	if l.hints != nil {
+		nid, ok, _ := l.hints.load(uid, name)
+		return nid, ok
+	}
 	l.rw.RLock()
 	defer l.rw.RUnlock()
 
@@ -592,18 +645,32 @@ func (l *NodeLinker) WatchUserLocate() {
 				}
 
 				for _, event := range events {
-					switch event.Type {
-					case locate.BindNode:
-						l.doStoreSource(event.UID, event.InsName, event.InsID)
-					case locate.UnbindNode:
-						l.doDeleteSource(event.UID, event.InsName, event.InsID)
-					default:
-						// ignore
-					}
+					l.applySourceEvent(event)
 				}
 			}
 		}
 	}()
+}
+
+func (l *NodeLinker) SourceHintCount() int {
+	if l.hints == nil {
+		return 0
+	}
+	return l.hints.count()
+}
+func (l *NodeLinker) applySourceEvent(event *locate.Event) {
+	if event.Type != locate.BindNode && event.Type != locate.UnbindNode {
+		return
+	}
+	if l.hints != nil {
+		l.hints.invalidate(event.UID, event.InsName)
+		return
+	}
+	if event.Type == locate.BindNode {
+		l.doStoreSource(event.UID, event.InsName, event.InsID)
+	} else {
+		l.doDeleteSource(event.UID, event.InsName, event.InsID)
+	}
 }
 
 // WatchClusterInstance 监听集群实例

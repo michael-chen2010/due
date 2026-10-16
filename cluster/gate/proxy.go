@@ -19,19 +19,25 @@ type proxy struct {
 
 func newProxy(gate *Gate) *proxy {
 	return &proxy{gate: gate, nodeLinker: link.NewNodeLinker(gate.ctx, &link.Options{
-		ID:                gate.opts.id,
-		Kind:              cluster.Gate,
-		Locator:           gate.opts.locator,
-		Registry:          gate.opts.registry,
-		Dispatch:          gate.opts.dispatch,
-		ConnNum:           gate.opts.connNum,
-		CallTimeout:       gate.opts.callTimeout,
-		DialTimeout:       gate.opts.dialTimeout,
-		DialRetryTimes:    gate.opts.dialRetryTimes,
-		WriteTimeout:      gate.opts.writeTimeout,
-		WriteQueueSize:    gate.opts.writeQueueSize,
-		FaultRecoveryTime: gate.opts.faultRecoveryTime,
+		SourceHintCapacity: gate.opts.sourceHintCapacity,
+		ID:                 gate.opts.id,
+		Kind:               cluster.Gate,
+		Locator:            gate.opts.locator,
+		Registry:           gate.opts.registry,
+		Dispatch:           gate.opts.dispatch,
+		ConnNum:            gate.opts.connNum,
+		CallTimeout:        gate.opts.callTimeout,
+		DialTimeout:        gate.opts.dialTimeout,
+		DialRetryTimes:     gate.opts.dialRetryTimes,
+		WriteTimeout:       gate.opts.writeTimeout,
+		WriteQueueSize:     gate.opts.writeQueueSize,
+		FaultRecoveryTime:  gate.opts.faultRecoveryTime,
 	})}
+}
+
+// SourceHintCounts reports only this Gate's disposable Node routing hints.
+func (g *Gate) SourceHintCounts() (capacity, nodeHints int) {
+	return g.opts.sourceHintCapacity, g.proxy.nodeLinker.SourceHintCount()
 }
 
 // 绑定用户与网关间的关系

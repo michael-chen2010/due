@@ -67,6 +67,7 @@ type StatelessRouteAffinity func(route int32, payload []byte) (uid int64, group 
 type RejectedRequestHandler func(network.Conn, cluster.RequestMetadata, []byte, error) error
 
 type options struct {
+	sourceHintCapacity     int
 	ctx                    context.Context        // 上下文
 	id                     string                 // 实例ID
 	name                   string                 // 实例名称
@@ -90,6 +91,15 @@ type options struct {
 	writeTimeout           time.Duration         // 内部RPC写入超时时间
 	writeQueueSize         int32                 // 内部RPC写入队列大小
 	faultRecoveryTime      time.Duration         // 内部RPC故障恢复时间
+}
+
+// WithSourceHintCapacity bounds this Gate's disposable Node routing hints.
+// Zero preserves legacy caching.
+func WithSourceHintCapacity(capacity int) Option {
+	if capacity < 0 {
+		panic("source hint capacity must not be negative")
+	}
+	return func(o *options) { o.sourceHintCapacity = capacity }
 }
 
 // WithRejectedRequestHandler is opt-in; Due does not prescribe a wire error.

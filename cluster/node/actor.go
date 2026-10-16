@@ -106,7 +106,7 @@ func (a *Actor) Idle() {
 		a.idleTimer.Stop()
 	}
 	a.idleGeneration++
-	a.scheduleIdleReleaseLocked(a.idleGeneration)
+	a.scheduleIdleReleaseLocked(a.idleGeneration, a.opts.idleTimeout)
 	a.lifecycleMu.Unlock()
 }
 
@@ -114,8 +114,8 @@ func (a *Actor) Idle() {
 // including transient Redis/Session lookup errors, must NOT permanently strand
 // an idle Actor until another unrelated Idle() call. Retry with the SAME
 // generation so Active/Touch or a newer Idle reliably cancels stale retries.
-func (a *Actor) scheduleIdleReleaseLocked(generation uint64) {
-	a.idleTimer = time.AfterFunc(a.opts.idleTimeout, func() {
+func (a *Actor) scheduleIdleReleaseLocked(generation uint64, delay time.Duration) {
+	a.idleTimer = time.AfterFunc(delay, func() {
 		a.releaseIdleGeneration(generation)
 	})
 }
@@ -132,7 +132,11 @@ func (a *Actor) releaseIdleGeneration(generation uint64) {
 	if a.opts.releaseGuard != nil && !a.opts.releaseGuard(a) {
 		a.lifecycleMu.Lock()
 		if a.state.Load() == started && a.idleGeneration == generation {
-			a.scheduleIdleReleaseLocked(generation)
+			// The initial grace has already elapsed. A full retirement queue or
+			// transient lookup failure must not impose that entire grace again.
+			// Keep short configured intervals and cap only subsequent retries.
+			delay := min(a.opts.idleTimeout, time.Second)
+			a.scheduleIdleReleaseLocked(generation, delay)
 		}
 		a.lifecycleMu.Unlock()
 		return

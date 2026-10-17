@@ -38,6 +38,10 @@ type Container struct {
 	shutdownInit sync.Once
 	shutdownOnce sync.Once
 	shutdownCh   chan struct{}
+
+	shutdownFinishOnce sync.Once
+	shutdownMu         sync.Mutex
+	shutdownErr        error
 }
 
 // NewContainer 创建一个容器
@@ -85,15 +89,44 @@ func (c *Container) Serve(once ...bool) {
 		c.doWaitSystemSignal()
 	}
 
-	if err := c.doCloseComponents(); err != nil {
-		log.Errorf("container close components exceeded shutdown deadline: %v", err)
+	if err := c.finishShutdown(); err != nil {
+		log.Errorf("%v", err)
+		// Close/Destroy may still be running in a non-cooperative component.
+		// Never start Destroy after a failed Close, or clear its live modules.
+		// The caller must terminate the failed process, not advertise success.
+		return
 	}
-
-	if err := c.doDestroyComponents(); err != nil {
-		log.Errorf("container destroy components exceeded shutdown deadline: %v", err)
-	}
-
 	c.doClearModules()
+}
+
+// ShutdownError is sticky once a Close or Destroy barrier fails.
+// Callers must treat a non-nil result as an unsuccessful process shutdown.
+func (c *Container) ShutdownError() error {
+	if c == nil {
+		return nil
+	}
+	c.shutdownMu.Lock()
+	defer c.shutdownMu.Unlock()
+	return c.shutdownErr
+}
+
+// finishShutdown is one-shot: even if a timed-out Close eventually finishes,
+// a later invocation cannot run Destroy against its uncertain lifecycle.
+func (c *Container) finishShutdown() error {
+	c.shutdownFinishOnce.Do(func() {
+		if err := c.doCloseComponents(); err != nil {
+			c.shutdownMu.Lock()
+			c.shutdownErr = fmt.Errorf("container close components exceeded shutdown deadline: %w", err)
+			c.shutdownMu.Unlock()
+			return
+		}
+		if err := c.doDestroyComponents(); err != nil {
+			c.shutdownMu.Lock()
+			c.shutdownErr = fmt.Errorf("container destroy components exceeded shutdown deadline: %w", err)
+			c.shutdownMu.Unlock()
+		}
+	})
+	return c.ShutdownError()
 }
 
 // 初始化所有组件

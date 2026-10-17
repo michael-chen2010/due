@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,6 +59,86 @@ func (c *blockingCloseComponent) Close() {
 
 func (c *blockingCloseComponent) ShutdownCloseStatus() string {
 	return "stage=waitgroup pending_waits=1"
+}
+
+type trackedShutdownComponent struct {
+	component.Base
+	closeRelease chan struct{}
+	destroyCalls atomic.Int32
+}
+
+func (c *trackedShutdownComponent) Close()   { <-c.closeRelease }
+func (c *trackedShutdownComponent) Destroy() { c.destroyCalls.Add(1) }
+
+func TestContainerShutdownCloseTimeoutNeverRunsConcurrentDestroy(t *testing.T) {
+	const key = "etc.shutdownMaxWaitTime"
+	original := etc.Get(key).String()
+	t.Cleanup(func() { _ = etc.Set(key, original) })
+	if err := etc.Set(key, 25*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	c := NewContainer()
+	blocked := &trackedShutdownComponent{closeRelease: make(chan struct{})}
+	c.Add(blocked)
+	started := time.Now()
+	err := c.finishShutdown()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected close deadline: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("shutdown elapsed %v", elapsed)
+	}
+	if blocked.destroyCalls.Load() != 0 {
+		t.Fatal("Destroy ran while Close was still in flight")
+	}
+	if !errors.Is(c.ShutdownError(), context.DeadlineExceeded) {
+		t.Fatalf("shutdown status lost failed Close: %v", c.ShutdownError())
+	}
+	close(blocked.closeRelease)
+	if again := c.finishShutdown(); !errors.Is(again, context.DeadlineExceeded) {
+		t.Fatalf("retry must keep first uncertain shutdown: %v", again)
+	}
+	if blocked.destroyCalls.Load() != 0 {
+		t.Fatal("late Close or repeated shutdown must not launch Destroy")
+	}
+}
+
+func TestContainerShutdownSuccessfulCloseRunsDestroy(t *testing.T) {
+	c := NewContainer()
+	tracked := &trackedShutdownComponent{closeRelease: make(chan struct{})}
+	close(tracked.closeRelease)
+	c.Add(tracked)
+	if err := c.finishShutdown(); err != nil {
+		t.Fatal(err)
+	}
+	if tracked.destroyCalls.Load() != 1 {
+		t.Fatal("normal shutdown skipped Destroy")
+	}
+	if c.ShutdownError() != nil {
+		t.Fatalf("successful shutdown reported failure: %v", c.ShutdownError())
+	}
+}
+
+func TestContainerShutdownDestroyFailureIsSticky(t *testing.T) {
+	const key = "etc.shutdownMaxWaitTime"
+	original := etc.Get(key).String()
+	t.Cleanup(func() { _ = etc.Set(key, original) })
+	if err := etc.Set(key, 25*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	c := NewContainer()
+	blocked := &blockingDestroyComponent{release: make(chan struct{})}
+	c.Add(blocked)
+	if err := c.finishShutdown(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("destroy deadline expected: %v", err)
+	}
+	close(blocked.release)
+	if err := c.finishShutdown(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("destroy error must remain sticky: %v", err)
+	}
+	if !errors.Is(c.ShutdownError(), context.DeadlineExceeded) {
+		t.Fatal("destroy failure was lost")
+	}
 }
 
 func TestContainerCloseReportsConfiguredShutdownDeadline(t *testing.T) {

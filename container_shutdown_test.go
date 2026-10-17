@@ -119,6 +119,54 @@ func TestContainerShutdownSuccessfulCloseRunsDestroy(t *testing.T) {
 	}
 }
 
+type slowCloseAndDestroyComponent struct {
+	component.Base
+	closeStarted   chan struct{}
+	closeRelease   chan struct{}
+	destroyStarted chan struct{}
+	destroyRelease chan struct{}
+}
+
+func (c *slowCloseAndDestroyComponent) Close() {
+	close(c.closeStarted)
+	<-c.closeRelease
+}
+func (c *slowCloseAndDestroyComponent) Destroy() {
+	close(c.destroyStarted)
+	<-c.destroyRelease
+}
+
+func TestContainerShutdownCloseAndDestroyShareOneDeadline(t *testing.T) {
+	const key = "etc.shutdownMaxWaitTime"
+	original := etc.Get(key).String()
+	t.Cleanup(func() { _ = etc.Set(key, original) })
+	const budget = 180 * time.Millisecond
+	if err := etc.Set(key, budget); err != nil {
+		t.Fatal(err)
+	}
+	c := NewContainer()
+	blocker := &slowCloseAndDestroyComponent{closeStarted: make(chan struct{}), closeRelease: make(chan struct{}), destroyStarted: make(chan struct{}), destroyRelease: make(chan struct{})}
+	c.Add(blocker)
+	defer close(blocker.destroyRelease)
+	// Close completes after most of the configured deadline is spent.
+	go func() { <-blocker.closeStarted; time.Sleep(130 * time.Millisecond); close(blocker.closeRelease) }()
+	start := time.Now()
+	err := c.finishShutdown()
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Destroy deadline expected: %v", err)
+	}
+	select {
+	case <-blocker.destroyStarted:
+	default:
+		t.Fatal("Close completed, Destroy must be attempted")
+	}
+	// An independent Destroy budget would take about 130+180ms.
+	if elapsed > 270*time.Millisecond {
+		t.Fatalf("Close/Destroy spent independent budgets: %v", elapsed)
+	}
+}
+
 func TestContainerShutdownDestroyFailureIsSticky(t *testing.T) {
 	const key = "etc.shutdownMaxWaitTime"
 	original := etc.Get(key).String()

@@ -114,13 +114,25 @@ func (c *Container) ShutdownError() error {
 // a later invocation cannot run Destroy against its uncertain lifecycle.
 func (c *Container) finishShutdown() error {
 	c.shutdownFinishOnce.Do(func() {
-		if err := c.doCloseComponents(); err != nil {
+		budget := etc.Get(defaultShutdownMaxWaitTimeKey).Duration()
+		if budget <= 0 {
+			budget = defaultDestroyMaxWaitTime
+		}
+		deadline := time.Now().Add(budget)
+		if err := c.doCloseComponentsWithin(budget); err != nil {
 			c.shutdownMu.Lock()
 			c.shutdownErr = fmt.Errorf("container close components exceeded shutdown deadline: %w", err)
 			c.shutdownMu.Unlock()
 			return
 		}
-		if err := c.doDestroyComponents(); err != nil {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			c.shutdownMu.Lock()
+			c.shutdownErr = fmt.Errorf("container shutdown deadline before destroy: %w", context.DeadlineExceeded)
+			c.shutdownMu.Unlock()
+			return
+		}
+		if err := c.doDestroyComponentsWithin(remaining); err != nil {
 			c.shutdownMu.Lock()
 			c.shutdownErr = fmt.Errorf("container destroy components exceeded shutdown deadline: %w", err)
 			c.shutdownMu.Unlock()
@@ -145,6 +157,10 @@ func (c *Container) doStartComponents() {
 
 // 关闭所有组件
 func (c *Container) doCloseComponents() error {
+	return c.doCloseComponentsWithin(etc.Get(defaultShutdownMaxWaitTimeKey).Duration())
+}
+
+func (c *Container) doCloseComponentsWithin(timeout time.Duration) error {
 	g := xcall.NewGoroutines()
 	closed := make([]atomic.Bool, len(c.components))
 
@@ -156,10 +172,7 @@ func (c *Container) doCloseComponents() error {
 		})
 	}
 
-	err := g.Run(
-		context.Background(),
-		etc.Get(defaultShutdownMaxWaitTimeKey).Duration(),
-	)
+	err := g.Run(context.Background(), timeout)
 	if err == nil {
 		return nil
 	}
@@ -186,15 +199,17 @@ func (c *Container) doCloseComponents() error {
 
 // 销毁所有组件
 func (c *Container) doDestroyComponents() error {
-	g := xcall.NewGoroutines()
-
-	for _, comp := range c.components {
-		g.Add(comp.Destroy)
-	}
-
 	timeout := etc.Get(defaultShutdownMaxWaitTimeKey).Duration()
 	if timeout <= 0 {
 		timeout = defaultDestroyMaxWaitTime
+	}
+	return c.doDestroyComponentsWithin(timeout)
+}
+
+func (c *Container) doDestroyComponentsWithin(timeout time.Duration) error {
+	g := xcall.NewGoroutines()
+	for _, comp := range c.components {
+		g.Add(comp.Destroy)
 	}
 	return g.Run(context.Background(), timeout)
 }

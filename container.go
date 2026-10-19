@@ -42,6 +42,7 @@ type Container struct {
 	shutdownFinishOnce sync.Once
 	shutdownMu         sync.Mutex
 	shutdownErr        error
+	shutdownStartedAt  time.Time
 }
 
 // NewContainer 创建一个容器
@@ -64,8 +65,23 @@ func (c *Container) Shutdown() {
 
 	ch := c.shutdownSignal()
 	c.shutdownOnce.Do(func() {
+		c.shutdownMu.Lock()
+		c.shutdownStartedAt = time.Now()
+		c.shutdownMu.Unlock()
 		close(ch)
 	})
+}
+
+// ShutdownStarted closes when the first shutdown request is observed, before
+// component cleanup. Process entrypoints may retain a watchdog beyond Serve.
+func (c *Container) ShutdownStarted() <-chan struct{} { return c.shutdownSignal() }
+
+// ShutdownStartedAt preserves the first request time, including when the
+// observer goroutine is delayed. Its monotonic clock anchors one total budget.
+func (c *Container) ShutdownStartedAt() time.Time {
+	c.shutdownMu.Lock()
+	defer c.shutdownMu.Unlock()
+	return c.shutdownStartedAt
 }
 
 func (c *Container) shutdownSignal() chan struct{} {
@@ -114,6 +130,7 @@ func (c *Container) ShutdownError() error {
 // a later invocation cannot run Destroy against its uncertain lifecycle.
 func (c *Container) finishShutdown() error {
 	c.shutdownFinishOnce.Do(func() {
+		c.Shutdown()
 		budget := etc.Get(defaultShutdownMaxWaitTimeKey).Duration()
 		if budget <= 0 {
 			budget = defaultDestroyMaxWaitTime
@@ -231,6 +248,7 @@ func (c *Container) doWaitSystemSignal() {
 
 	select {
 	case s := <-sig:
+		c.Shutdown()
 		log.Warnf("process got signal %v, container will close", s)
 	case <-c.shutdownSignal():
 		log.Warn("container shutdown requested, container will close")

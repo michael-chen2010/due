@@ -748,3 +748,8 @@ throughput (TPS)     : 159147
 `gate.WithRejectedRequestHandler`可选装配应用协议错误响应，默认nil。仅在`proxy.deliver`同步返回错误、帧尚未被Node transport成功接纳时调用，参数为原物理连接、Gate生成的RequestMetadata、原适配后Due帧及cause；回调返回错误仅记录日志，Trace仍保留原投递结果。成功入队后的写出失败、响应丢失和Game错误不会调用它，应用不得将这类已接纳请求按NOT_EXECUTED重试。Due不定义应用错误码或protobuf；应用需使用原连接的seq映射响应并回收对应inflight，不向客户端泄露cause。
 
 WebGameServer将其显式装配为503/NOT_EXECUTED/短重试提示；Gate先启动无Game时可明确拒绝，Game上线后原连接可恢复。Gate请求已使用内部`NodeLinker.DeliverRequest`严格入口：缺玩家Game定位返回原ErrNotFoundUserLocation并进入拒绝回调，不以nil冒充已投递；原通用`Deliver`供Node/Mesh使用的缺目标抑制语义保持。没有新增已入队请求的自动重试，不改Token/Owner fencing。这仍不表示整体业务Ready。
+
+
+### WebGame M6 shutdown notification (2026-10-19)
+
+`Container.ShutdownStarted()` closes before component cleanup on the first programmatic or OS-signal shutdown request (including Serve-once cleanup). `ShutdownStartedAt()` preserves that request's monotonic timestamp. Repeated requests never renew the deadline. Process owners can use these APIs to keep one watchdog alive beyond `Serve`, across their own deferred resource cleanup. Container Close/Destroy barriers and sticky shutdown errors remain in force; this notification does not release ownership or retry writes. Root package race tests passed three times; WebGame's process deadline subprocess tests do not substitute for its pending physical Game/Gate write-recovery G2 acceptance.

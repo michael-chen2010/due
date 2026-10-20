@@ -22,10 +22,12 @@ func (p *provider) Bind(ctx context.Context, cid, uid int64) error {
 
 	token, err := p.gate.bindSession(ctx, cid, uid)
 	if err != nil {
+		log.Warnf("bind gate session ownership failed, gid: %s cid: %d uid: %d err: %v", p.gate.opts.id, cid, uid, err)
 		return err
 	}
 
 	if err = p.gate.proxy.bindGate(ctx, cid, uid); err != nil {
+		log.Warnf("bind gate Redis locator failed, gid: %s cid: %d uid: %d err: %v", p.gate.opts.id, cid, uid, err)
 		_, _ = p.gate.session.Unbind(uid)
 		if _, releaseErr := p.gate.releaseSession(ctx, token); releaseErr != nil {
 			log.Errorf("release session ownership after bind failure failed, uid = %d err = %v", uid, releaseErr)

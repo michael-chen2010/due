@@ -57,6 +57,25 @@ func NewNodeLinker(ctx context.Context, opts *Options) *NodeLinker {
 	return l
 }
 
+// InvalidateSessionSourceHints drops only disposable Game routing information
+// after a Gate has accepted a new authenticated session. Redis cold key loss
+// can discard BindNode PubSub events while leaving Gate in-memory hints alive.
+// The next stateful request must re-query the authoritative locator, never
+// reuse the previous session's cached Game owner.
+func (l *NodeLinker) InvalidateSessionSourceHints(uid int64) {
+	if uid <= 0 || l.opts.Kind != cluster.Gate {
+		return
+	}
+	if l.hints != nil {
+		l.hints.invalidate(uid, "game")
+		return
+	}
+	// Legacy Gate maps are hints only; do not manipulate Node-owned duties.
+	l.rw.Lock()
+	delete(l.sources, uid)
+	l.rw.Unlock()
+}
+
 // HasNode 检测是否存在某个节点
 func (l *NodeLinker) HasNode(nid string) bool {
 	_, err := l.dispatcher.FindEndpoint(nid)

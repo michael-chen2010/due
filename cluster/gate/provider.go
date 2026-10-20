@@ -35,6 +35,11 @@ func (p *provider) Bind(ctx context.Context, cid, uid int64) error {
 		return err
 	}
 
+	// A Redis cold restart can erase the authoritative routing hash and lose
+	// old PubSub unbind notifications while this Gate's process stays alive.
+	// Only after a new session is durably bound, discard the old Game hint;
+	// the next stateful request must resolve the newly bound Game.
+	p.gate.proxy.nodeLinker.InvalidateSessionSourceHints(uid)
 	return nil
 }
 

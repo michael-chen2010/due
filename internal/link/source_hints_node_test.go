@@ -122,3 +122,23 @@ func TestNodeHintsLateAuthorityReplyCannotRefillAfterNotification(t *testing.T) 
 		t.Fatal("next miss did not requery new authority")
 	}
 }
+
+func TestGateSessionBindInvalidatesSourceHintAfterRedisColdHashLoss(t *testing.T) {
+	ctx := context.Background()
+	loc := &hintTestLocator{staleRouteTestLocator: staleRouteTestLocator{node: "game-old"}}
+	l := NewNodeLinker(ctx, &Options{ID: "gate-a", Kind: cluster.Gate, Dispatch: cluster.Random, Locator: loc, SourceHintCapacity: 4})
+	const uid int64 = 90001
+	if node, err := l.LocateNode(ctx, uid, "game"); err != nil || node != "game-old" {
+		t.Fatalf("old route not cached: node=%q err=%v", node, err)
+	}
+	// All Redis keys have been wiped. The prior PubSub Unbind notification
+	// was lost and the new Game has republished an authoritative binding.
+	loc.node = "game-new"
+	if node, err := l.LocateNode(ctx, uid, "game"); err != nil || node != "game-old" {
+		t.Fatalf("fixture needs genuinely stale hint, got node=%q err=%v", node, err)
+	}
+	l.InvalidateSessionSourceHints(uid)
+	if node, err := l.LocateNode(ctx, uid, "game"); err != nil || node != "game-new" || loc.reads != 2 {
+		t.Fatalf("new authenticated session reused old Game after Redis cold loss: node=%q reads=%d err=%v", node, loc.reads, err)
+	}
+}

@@ -68,6 +68,7 @@ type serverOptions struct {
 	heartbeatInterval               time.Duration      // 心跳间隔时间，默认10s
 	heartbeatMechanism              HeartbeatMechanism // 心跳机制，默认resp
 	packetHeartbeatInspection       bool               // 是否按Due packet检查心跳，默认开启
+	recycleConnections              bool               // 默认复用连接对象；持有异步回调引用的适配器可关闭
 	authorizeTimeout                time.Duration      // 授权超时时间，默认0s，不检测
 	sendFailureObserver             ServerSendFailureObserver
 }
@@ -75,6 +76,7 @@ type serverOptions struct {
 func defaultServerOptions() *serverOptions {
 	opts := &serverOptions{
 		packetHeartbeatInspection: true,
+		recycleConnections:        true,
 	}
 	opts.path = etc.Get(defaultServerPathKey, defaultServerPath).String()
 	opts.certFile = etc.Get(defaultServerCertFileKey).String()
@@ -315,6 +317,13 @@ func WithServerHeartbeatMechanism(heartbeatMechanism HeartbeatMechanism) ServerO
 // 默认开启以保持现有Due客户端/服务端协议兼容；公开自定义二进制协议可显式关闭。
 func WithServerPacketHeartbeatInspection(enabled bool) ServerOption {
 	return func(o *serverOptions) { o.packetHeartbeatInspection = enabled }
+}
+
+// WithServerConnectionRecycling allows adapters with asynchronous Socket
+// callbacks to retain an exact closed Conn safely. Disabled instances are never
+// reset/reused for a successor; default pooling behavior remains unchanged.
+func WithServerConnectionRecycling(enabled bool) ServerOption {
+	return func(o *serverOptions) { o.recycleConnections = enabled }
 }
 
 // WithServerAuthorizeTimeout 设置授权超时时间

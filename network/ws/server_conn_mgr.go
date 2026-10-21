@@ -124,6 +124,9 @@ func (cm *serverConnMgr) recycle(c *websocket.Conn) {
 	index := int(reflect.ValueOf(c).Pointer()) % len(cm.partitions)
 	if conn, ok := cm.partitions[index].delete(c); ok {
 		cm.total.Add(-1)
+		if !cm.server.opts.recycleConnections {
+			return
+		}
 		xcall.Go(func() {
 			conn.workers.Wait()
 			conn.reset()

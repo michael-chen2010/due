@@ -68,13 +68,16 @@ func TestServerReadLimitRejectsBeforeReadingAdvertisedPayload(t *testing.T) {
 func TestServerReadLimitAppliesToWholeFragmentedMessage(t *testing.T) {
 	addr, received := readLimitServer(t, WithServerMaxReadMessageBytes(64))
 	c := readLimitClient(t, addr)
-	w, err := c.NextWriter(websocket.BinaryMessage)
-	if err != nil {
+	// A masked 32-byte non-final binary frame, then a continuation header
+	// advertising 33 more bytes. Do not send surplus payload: Windows may
+	// otherwise reset the TCP stream with unread bytes and hide the 1009 close.
+	first := append([]byte{0x02, 0xa0, 0, 0, 0, 0}, make([]byte, 32)...)
+	if _, err := c.UnderlyingConn().Write(first); err != nil {
 		t.Fatal(err)
 	}
-	// Force many small continuation frames whose total crosses the limit.
-	_, _ = w.Write(bytes.Repeat([]byte("f"), 256))
-	_ = w.Close()
+	if _, err := c.UnderlyingConn().Write([]byte{0x80, 0xa1, 0, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
 	requireMessageTooBig(t, c, received)
 }
 

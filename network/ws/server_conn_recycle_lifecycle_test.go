@@ -158,3 +158,28 @@ func TestServerConnRecycleWaitsForWriterExitBeforeReset(t *testing.T) {
 		t.Fatal("blocked writer did not return after release")
 	}
 }
+
+func TestServerConnectionRecyclingCanBeDisabledForExactAsyncReferences(t *testing.T) {
+	if !defaultServerOptions().recycleConnections {
+		t.Fatal("legacy pooling default changed")
+	}
+	s := NewServer(WithServerConnectionRecycling(false)).(*server)
+	raw := new(websocket.Conn)
+	retained := &serverConn{attr: &attr{}}
+	index := int(reflect.ValueOf(raw).Pointer()) % len(s.connMgr.partitions)
+	s.connMgr.partitions[index].store(raw, retained)
+	s.connMgr.total.Store(1)
+	s.connMgr.recycle(raw)
+	if s.connMgr.total.Load() != 0 {
+		t.Fatal("disabled pooling leaked capacity")
+	}
+	// No reader/writer workers remain; a pooling implementation would reset
+	// the retained object before returning it to its pool.
+	time.Sleep(30 * time.Millisecond)
+	if retained.attr == nil {
+		t.Fatal("disabled recycling reset a retained Socket incarnation")
+	}
+	if next := s.connMgr.pool.Get().(*serverConn); next == retained {
+		t.Fatal("closed incarnation reissued to successor")
+	}
+}

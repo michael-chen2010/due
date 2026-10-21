@@ -53,6 +53,7 @@ type CheckOriginFunc func(r *http.Request) bool
 type serverOptions struct {
 	addr                            string             // 监听地址
 	maxConnNum                      int                // 最大连接数
+	maxReadMessageBytes             int64              // 完整消息读取上限，0 保持历史无限制
 	listenBacklog                   int                // TCP listen backlog，0 表示保留 Go/OS 默认
 	certFile                        string             // 证书文件
 	keyFile                         string             // 秘钥文件
@@ -192,6 +193,17 @@ func WithServerMaxConnNum(maxConnNum int) ServerOption {
 			o.maxConnNum = maxConnNum
 		} else {
 			log.Warnf("the specified maxConnNum is less than zero and will be ignored")
+		}
+	}
+}
+
+// WithServerMaxReadMessageBytes limits a whole WebSocket message, including
+// all continuation frames, before it is buffered or dispatched. Zero preserves
+// legacy behavior. Negative values are ignored, so they cannot disable a limit.
+func WithServerMaxReadMessageBytes(limit int64) ServerOption {
+	return func(o *serverOptions) {
+		if limit >= 0 {
+			o.maxReadMessageBytes = limit
 		}
 	}
 }

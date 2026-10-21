@@ -69,6 +69,11 @@ func (cm *serverConnMgr) allocate(c *websocket.Conn) error {
 	if !cm.reserve() {
 		return errors.ErrTooManyConnection
 	}
+	// Install before init starts the reader. Gorilla checks the cumulative
+	// message length at each frame header, before buffering its payload.
+	if cm.server.opts.maxReadMessageBytes > 0 {
+		c.SetReadLimit(cm.server.opts.maxReadMessageBytes)
+	}
 
 	id := cm.id.Add(1)
 	conn := cm.pool.Get().(*serverConn)

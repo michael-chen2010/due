@@ -57,13 +57,14 @@ func PrintBoxInfo(name string, infos ...string) {
 
 func buildRowInfo(info string) string {
 	str := fmt.Sprintf("%s %s", verticalBorder, info)
-	str += strings.Repeat(" ", boxWidth-utf8.RuneCountInString(str)-1)
+	// Long component names must not make diagnostic output abort startup.
+	str += strings.Repeat(" ", max(0, boxWidth-utf8.RuneCountInString(str)-1))
 	str += verticalBorder
 	return str
 }
 
 func buildTopBorder(name ...string) string {
-	full := boxWidth - strLen(leftTopBorder) - strLen(rightTopBorder) - strLen(name...)
+	full := max(0, boxWidth-strLen(leftTopBorder)-strLen(rightTopBorder)-strLen(name...))
 	half := full / 2
 	str := leftTopBorder
 	str += strings.Repeat(horizontalBorder, half)
